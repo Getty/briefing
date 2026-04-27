@@ -1,0 +1,173 @@
+#!/usr/bin/env perl
+# briefing — PreToolUse hook for the Agent tool.
+#
+# Reads the target subagent's frontmatter, resolves the `skills:` list,
+# and rewrites tool_input.prompt to inline the full SKILL.md body of each
+# declared skill before the agent's original prompt.
+#
+# Hard-fail policy: if any declared skill cannot be resolved, the Agent
+# spawn is denied with a clear error message.
+use strict;
+use warnings;
+use utf8;
+use JSON::PP;
+
+binmode STDIN,  ':utf8';
+binmode STDOUT, ':utf8';
+binmode STDERR, ':utf8';
+
+my $raw = do { local $/; <STDIN> };
+exit 0 unless length $raw;
+
+my $input = eval { decode_json($raw) };
+exit 0 if $@ || !$input;
+
+exit 0 unless ($input->{tool_name} // '') eq 'Agent';
+
+my $ti       = $input->{tool_input} // {};
+my $subagent = $ti->{subagent_type} // '';
+exit 0 unless length $subagent;
+
+my $cwd  = $input->{cwd} // $ENV{PWD} // '.';
+my $home = $ENV{HOME} // '';
+
+my $agent_file = find_first_readable(
+    "$cwd/.claude/agents/$subagent.md",
+    "$home/.claude/agents/$subagent.md",
+);
+exit 0 unless $agent_file;  # unknown agent — no-op, let harness handle
+
+my $agent_md = slurp($agent_file);
+my ($fm, undef) = split_frontmatter($agent_md);
+
+my @skills = parse_skills_list($fm);
+exit 0 unless @skills;
+
+my (@blocks, @missing);
+for my $name (@skills) {
+    my $path = resolve_skill($name, $cwd, $home);
+    if (!$path) { push @missing, $name; next }
+    my $body = slurp($path);
+    my (undef, $skill_body) = split_frontmatter($body);
+    push @blocks, "## Skill: $name\n\n$skill_body";
+}
+
+if (@missing) {
+    my $msg = "briefing: agent '$subagent' references unknown skill(s): "
+            . join(', ', @missing);
+    print STDERR "$msg\n";
+    print encode_json({
+        hookSpecificOutput => {
+            hookEventName            => 'PreToolUse',
+            permissionDecision       => 'deny',
+            permissionDecisionReason => $msg,
+        },
+    });
+    exit 0;
+}
+
+my $original = $ti->{prompt} // '';
+my $header = <<"END";
+# Briefing — pre-loaded skills
+
+The skills below have been injected directly into your context by the
+briefing plugin. Treat them as already loaded — do NOT call the Skill
+tool for any of these names; their content is already here.
+
+END
+
+$ti->{prompt} = $header
+              . join("\n\n---\n\n", @blocks)
+              . "\n\n---\n\n# Original task\n\n"
+              . $original;
+
+print encode_json({
+    hookSpecificOutput => {
+        hookEventName => 'PreToolUse',
+        updatedInput  => $ti,
+    },
+});
+exit 0;
+
+# --- helpers --------------------------------------------------------------
+
+sub slurp {
+    my ($p) = @_;
+    open my $fh, '<:utf8', $p or return '';
+    local $/;
+    return scalar <$fh>;
+}
+
+sub find_first_readable {
+    for my $p (@_) { return $p if defined $p && length $p && -r $p }
+    return undef;
+}
+
+sub split_frontmatter {
+    my ($txt) = @_;
+    if ($txt =~ /\A---\r?\n(.*?)\r?\n---\r?\n(.*)\z/s) {
+        return ($1, $2);
+    }
+    return ('', $txt);
+}
+
+sub parse_skills_list {
+    my ($fm) = @_;
+    return () unless length $fm;
+
+    # YAML block list:
+    #   skills:
+    #     - foo
+    #     - bar:baz
+    if ($fm =~ /^skills:[ \t]*\r?\n((?:[ \t]*-[ \t]*[^\r\n]+\r?\n?)+)/m) {
+        my $blk = $1;
+        my @out;
+        while ($blk =~ /^[ \t]*-[ \t]*(["']?)([^"'\r\n]+)\1[ \t]*$/mg) {
+            my $v = $2;
+            $v =~ s/^\s+|\s+$//g;
+            push @out, $v if length $v;
+        }
+        return @out;
+    }
+
+    # YAML flow list:  skills: [foo, bar:baz]
+    if ($fm =~ /^skills:[ \t]*\[([^\]\r\n]+)\]/m) {
+        return grep { length } map {
+            my $v = $_;
+            $v =~ s/^\s+|\s+$//g;
+            $v =~ s/^["']|["']$//g;
+            $v;
+        } split /,/, $1;
+    }
+
+    return ();
+}
+
+sub resolve_skill {
+    my ($name, $cwd, $home) = @_;
+
+    # explicit plugin namespace:  plugin:skill
+    if ($name =~ /\A([^:\s]+):(.+)\z/) {
+        my ($plugin, $skill) = ($1, $2);
+        my $direct = "$home/.claude/plugins/cache/$plugin/skills/$skill/SKILL.md";
+        return $direct if -r $direct;
+        # try nested plugin layouts: cache/<owner>/<plugin>/skills/...
+        for my $g (glob "$home/.claude/plugins/cache/*/$plugin/skills/$skill/SKILL.md") {
+            return $g if -r $g;
+        }
+        return undef;
+    }
+
+    # bare name — project, then user, then any plugin
+    for my $base ("$cwd/.claude/skills", "$home/.claude/skills") {
+        my $p = "$base/$name/SKILL.md";
+        return $p if -r $p;
+    }
+    for my $pat (
+        "$home/.claude/plugins/cache/*/skills/$name/SKILL.md",
+        "$home/.claude/plugins/cache/*/*/skills/$name/SKILL.md",
+    ) {
+        for my $g (glob $pat) { return $g if -r $g }
+    }
+    return undef;
+}
