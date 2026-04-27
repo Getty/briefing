@@ -1,10 +1,11 @@
 # Changelog
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-04-27
 
-Initial scaffold. Not yet published anywhere — install via
-`/plugin marketplace add Getty/briefing` from the GitHub repo
-directly.
+Initial release. Tagged as
+[`v0.1.0`](https://github.com/Getty/briefing/releases/tag/v0.1.0).
+Install via `/plugin marketplace add Getty/briefing` and
+`/plugin install briefing@briefing`.
 
 - `PreToolUse` hook on the `Agent` tool, written in Python 3 (stdlib
   only).

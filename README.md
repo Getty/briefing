@@ -102,7 +102,8 @@ Stdlib only. No dependencies. CI runs on Python 3.10 / 3.11 / 3.12.
 
 ## Status
 
-v0.1.0 (unreleased) — working hook with namespaced `briefing.skills`
-frontmatter, hard-fail on missing skills. Not submitted to any
-official directory yet; install directly from this repo. See `TODO.md`
-and `CHANGELOG.md`.
+[v0.1.0](https://github.com/Getty/briefing/releases/tag/v0.1.0) —
+working hook with namespaced `briefing.skills` frontmatter, hard-fail
+on missing skills. Not submitted to Anthropic's official directory
+yet; install directly from this repo. See `TODO.md` and
+`CHANGELOG.md`.
