@@ -1,4 +1,4 @@
-#!/usr/bin/env perl
+#!/usr/bin/env python3
 # briefing — PreToolUse hook for the Agent tool.
 #
 # Reads the target subagent's frontmatter, resolves the `skills:` list,
@@ -7,167 +7,186 @@
 #
 # Hard-fail policy: if any declared skill cannot be resolved, the Agent
 # spawn is denied with a clear error message.
-use strict;
-use warnings;
-use utf8;
-use JSON::PP;
 
-binmode STDIN,  ':utf8';
-binmode STDOUT, ':utf8';
-binmode STDERR, ':utf8';
+import glob
+import json
+import os
+import re
+import sys
 
-my $raw = do { local $/; <STDIN> };
-exit 0 unless length $raw;
 
-my $input = eval { decode_json($raw) };
-exit 0 if $@ || !$input;
+def slurp(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
 
-exit 0 unless ($input->{tool_name} // '') eq 'Agent';
 
-my $ti       = $input->{tool_input} // {};
-my $subagent = $ti->{subagent_type} // '';
-exit 0 unless length $subagent;
+def find_first_readable(*paths):
+    for p in paths:
+        if p and os.access(p, os.R_OK) and os.path.isfile(p):
+            return p
+    return None
 
-my $cwd  = $input->{cwd} // $ENV{PWD} // '.';
-my $home = $ENV{HOME} // '';
 
-my $agent_file = find_first_readable(
-    "$cwd/.claude/agents/$subagent.md",
-    "$home/.claude/agents/$subagent.md",
-);
-exit 0 unless $agent_file;  # unknown agent — no-op, let harness handle
+_FM_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n(.*)\Z", re.DOTALL)
 
-my $agent_md = slurp($agent_file);
-my ($fm, undef) = split_frontmatter($agent_md);
 
-my @skills = parse_skills_list($fm);
-exit 0 unless @skills;
+def split_frontmatter(text):
+    m = _FM_RE.match(text)
+    if m:
+        return m.group(1), m.group(2)
+    return "", text
 
-my (@blocks, @missing);
-for my $name (@skills) {
-    my $path = resolve_skill($name, $cwd, $home);
-    if (!$path) { push @missing, $name; next }
-    my $body = slurp($path);
-    my (undef, $skill_body) = split_frontmatter($body);
-    push @blocks, "## Skill: $name\n\n$skill_body";
-}
 
-if (@missing) {
-    my $msg = "briefing: agent '$subagent' references unknown skill(s): "
-            . join(', ', @missing);
-    print STDERR "$msg\n";
-    print encode_json({
-        hookSpecificOutput => {
-            hookEventName            => 'PreToolUse',
-            permissionDecision       => 'deny',
-            permissionDecisionReason => $msg,
-        },
-    });
-    exit 0;
-}
+_BLOCK_RE = re.compile(
+    r"^skills:[ \t]*\r?\n((?:[ \t]*-[ \t]*[^\r\n]+\r?\n?)+)", re.MULTILINE
+)
+_BLOCK_ITEM_RE = re.compile(
+    r'^[ \t]*-[ \t]*(["\']?)([^"\'\r\n]+)\1[ \t]*$', re.MULTILINE
+)
+_FLOW_RE = re.compile(r"^skills:[ \t]*\[([^\]\r\n]+)\]", re.MULTILINE)
 
-my $original = $ti->{prompt} // '';
-my $header = <<"END";
-# Briefing — pre-loaded skills
 
-The skills below have been injected directly into your context by the
-briefing plugin. Treat them as already loaded — do NOT call the Skill
-tool for any of these names; their content is already here.
+def parse_skills_list(fm):
+    if not fm:
+        return []
 
-END
+    m = _BLOCK_RE.search(fm)
+    if m:
+        out = []
+        for item in _BLOCK_ITEM_RE.finditer(m.group(1)):
+            v = item.group(2).strip()
+            if v:
+                out.append(v)
+        return out
 
-$ti->{prompt} = $header
-              . join("\n\n---\n\n", @blocks)
-              . "\n\n---\n\n# Original task\n\n"
-              . $original;
+    m = _FLOW_RE.search(fm)
+    if m:
+        return [
+            v.strip().strip('"').strip("'")
+            for v in m.group(1).split(",")
+            if v.strip()
+        ]
 
-print encode_json({
-    hookSpecificOutput => {
-        hookEventName => 'PreToolUse',
-        updatedInput  => $ti,
-    },
-});
-exit 0;
+    return []
 
-# --- helpers --------------------------------------------------------------
 
-sub slurp {
-    my ($p) = @_;
-    open my $fh, '<:utf8', $p or return '';
-    local $/;
-    return scalar <$fh>;
-}
+def resolve_skill(name, cwd, home):
+    # explicit plugin namespace: plugin:skill
+    if ":" in name and not name.startswith(":"):
+        plugin, _, skill = name.partition(":")
+        if plugin and skill and " " not in plugin:
+            direct = f"{home}/.claude/plugins/cache/{plugin}/skills/{skill}/SKILL.md"
+            if os.access(direct, os.R_OK):
+                return direct
+            for g in glob.glob(
+                f"{home}/.claude/plugins/cache/*/{plugin}/skills/{skill}/SKILL.md"
+            ):
+                if os.access(g, os.R_OK):
+                    return g
+            return None
 
-sub find_first_readable {
-    for my $p (@_) { return $p if defined $p && length $p && -r $p }
-    return undef;
-}
+    for base in (f"{cwd}/.claude/skills", f"{home}/.claude/skills"):
+        p = f"{base}/{name}/SKILL.md"
+        if os.access(p, os.R_OK):
+            return p
 
-sub split_frontmatter {
-    my ($txt) = @_;
-    if ($txt =~ /\A---\r?\n(.*?)\r?\n---\r?\n(.*)\z/s) {
-        return ($1, $2);
-    }
-    return ('', $txt);
-}
+    for pat in (
+        f"{home}/.claude/plugins/cache/*/skills/{name}/SKILL.md",
+        f"{home}/.claude/plugins/cache/*/*/skills/{name}/SKILL.md",
+    ):
+        for g in glob.glob(pat):
+            if os.access(g, os.R_OK):
+                return g
 
-sub parse_skills_list {
-    my ($fm) = @_;
-    return () unless length $fm;
+    return None
 
-    # YAML block list:
-    #   skills:
-    #     - foo
-    #     - bar:baz
-    if ($fm =~ /^skills:[ \t]*\r?\n((?:[ \t]*-[ \t]*[^\r\n]+\r?\n?)+)/m) {
-        my $blk = $1;
-        my @out;
-        while ($blk =~ /^[ \t]*-[ \t]*(["']?)([^"'\r\n]+)\1[ \t]*$/mg) {
-            my $v = $2;
-            $v =~ s/^\s+|\s+$//g;
-            push @out, $v if length $v;
+
+def main():
+    raw = sys.stdin.read()
+    if not raw:
+        return 0
+
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return 0
+    if not isinstance(data, dict):
+        return 0
+
+    if data.get("tool_name") != "Agent":
+        return 0
+
+    ti = data.get("tool_input") or {}
+    subagent = ti.get("subagent_type") or ""
+    if not subagent:
+        return 0
+
+    cwd = data.get("cwd") or os.environ.get("PWD") or "."
+    home = os.environ.get("HOME") or ""
+
+    agent_file = find_first_readable(
+        f"{cwd}/.claude/agents/{subagent}.md",
+        f"{home}/.claude/agents/{subagent}.md",
+    )
+    if not agent_file:
+        return 0
+
+    fm, _ = split_frontmatter(slurp(agent_file))
+    skills = parse_skills_list(fm)
+    if not skills:
+        return 0
+
+    blocks = []
+    missing = []
+    for name in skills:
+        path = resolve_skill(name, cwd, home)
+        if not path:
+            missing.append(name)
+            continue
+        _, body = split_frontmatter(slurp(path))
+        blocks.append(f"## Skill: {name}\n\n{body}")
+
+    if missing:
+        msg = (
+            f"briefing: agent '{subagent}' references unknown skill(s): "
+            + ", ".join(missing)
+        )
+        sys.stderr.write(msg + "\n")
+        sys.stdout.write(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": msg,
+            }
+        }))
+        return 0
+
+    original = ti.get("prompt") or ""
+    header = (
+        "# Briefing — pre-loaded skills\n\n"
+        "The skills below have been injected directly into your context by the\n"
+        "briefing plugin. Treat them as already loaded — do NOT call the Skill\n"
+        "tool for any of these names; their content is already here.\n\n"
+    )
+
+    ti["prompt"] = (
+        header
+        + "\n\n---\n\n".join(blocks)
+        + "\n\n---\n\n# Original task\n\n"
+        + original
+    )
+
+    sys.stdout.write(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "updatedInput": ti,
         }
-        return @out;
-    }
+    }))
+    return 0
 
-    # YAML flow list:  skills: [foo, bar:baz]
-    if ($fm =~ /^skills:[ \t]*\[([^\]\r\n]+)\]/m) {
-        return grep { length } map {
-            my $v = $_;
-            $v =~ s/^\s+|\s+$//g;
-            $v =~ s/^["']|["']$//g;
-            $v;
-        } split /,/, $1;
-    }
 
-    return ();
-}
-
-sub resolve_skill {
-    my ($name, $cwd, $home) = @_;
-
-    # explicit plugin namespace:  plugin:skill
-    if ($name =~ /\A([^:\s]+):(.+)\z/) {
-        my ($plugin, $skill) = ($1, $2);
-        my $direct = "$home/.claude/plugins/cache/$plugin/skills/$skill/SKILL.md";
-        return $direct if -r $direct;
-        # try nested plugin layouts: cache/<owner>/<plugin>/skills/...
-        for my $g (glob "$home/.claude/plugins/cache/*/$plugin/skills/$skill/SKILL.md") {
-            return $g if -r $g;
-        }
-        return undef;
-    }
-
-    # bare name — project, then user, then any plugin
-    for my $base ("$cwd/.claude/skills", "$home/.claude/skills") {
-        my $p = "$base/$name/SKILL.md";
-        return $p if -r $p;
-    }
-    for my $pat (
-        "$home/.claude/plugins/cache/*/skills/$name/SKILL.md",
-        "$home/.claude/plugins/cache/*/*/skills/$name/SKILL.md",
-    ) {
-        for my $g (glob $pat) { return $g if -r $g }
-    }
-    return undef;
-}
+if __name__ == "__main__":
+    sys.exit(main())

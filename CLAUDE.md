@@ -26,9 +26,9 @@ chance of the model "forgetting" to load them.
 ```
 .claude-plugin/plugin.json   plugin manifest (name, version, description)
 hooks/hooks.json             hook registration (PreToolUse → Agent)
-hooks/briefing-preload       the hook itself (Perl, executable)
+hooks/briefing-preload       the hook itself (Python 3, executable)
 examples/                    example agent + minimal skill for testing
-t/                           tests (prove -l t/)
+tests/                       pytest-style tests (python3 -m unittest)
 README.md                    user-facing intro
 TODO.md                      live worklist
 ```
@@ -79,15 +79,15 @@ First match wins.
 
 ## Style rules for working in this repo
 
-- Perl 5.36+ assumed for the hook. Core modules only — no CPAN deps.
-  The hook ships with whatever the user has; `JSON::PP` is core.
+- Python 3.8+ assumed for the hook. Standard library only — no pip
+  deps. `json`, `re`, `glob`, `os`, `sys` are all stdlib.
 - The hook is performance-critical: it runs on every `Agent` spawn.
   Keep it under ~50ms cold. No heavy imports.
-- All code paths must `exit 0` cleanly even on bad input. **Never
+- All code paths must exit 0 cleanly even on bad input. **Never
   block a spawn unless a declared skill is genuinely missing.** A
   parse error in someone else's agent file is not our bug.
-- Tests in `t/` use `prove -l t/`. No DBIO, no Moose — this repo is
-  intentionally tiny.
+- Tests live under `tests/` and run with `python3 -m unittest
+  discover tests`. Stdlib only.
 - Commit style: `git-commit-style` — compact conventional commits.
 
 ## What this plugin is NOT

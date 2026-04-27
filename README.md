@@ -47,21 +47,44 @@ it; only `briefing` reads it.
 
 ## Install
 
-Add to a marketplace, or symlink into a project:
+Clone the repo into your plugin cache and enable it:
 
-```
-~/.claude/plugins/<your-marketplace>/briefing/
+```sh
+git clone https://github.com/Getty/briefing.git \
+    ~/.claude/plugins/cache/briefing
 ```
 
-Then enable in `settings.json`:
+Then enable it in your Claude Code `settings.json`:
 
 ```json
 {
   "enabledPlugins": {
-    "briefing@<marketplace>": true
+    "briefing": true
   }
 }
 ```
+
+## Try it
+
+Drop the example agent + skill into any project:
+
+```sh
+cp examples/agents/briefing-demo.md       /your/project/.claude/agents/
+cp -r examples/skills/briefing-demo-skill /your/project/.claude/skills/
+```
+
+Spawn the `briefing-demo` subagent — it will echo back a magic phrase
+from `briefing-demo-skill/SKILL.md`, proving the skill body was already
+in its context before its first turn.
+
+## Develop
+
+```sh
+python3 -m py_compile hooks/briefing-preload
+python3 -m unittest discover tests -v
+```
+
+Stdlib only. No dependencies. CI runs on Python 3.10 / 3.11 / 3.12.
 
 ## Status
 
