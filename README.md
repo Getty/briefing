@@ -47,22 +47,16 @@ it; only `briefing` reads it.
 
 ## Install
 
-Clone the repo into your plugin cache and enable it:
+This repo is also a one-plugin marketplace. From inside Claude Code:
 
-```sh
-git clone https://github.com/Getty/briefing.git \
-    ~/.claude/plugins/cache/briefing
+```
+/plugin marketplace add Getty/briefing
+/plugin install briefing@briefing
 ```
 
-Then enable it in your Claude Code `settings.json`:
-
-```json
-{
-  "enabledPlugins": {
-    "briefing": true
-  }
-}
-```
+The first command registers the marketplace; the second installs the
+`briefing` plugin from it. The hook is active immediately on the next
+`Agent` spawn — no restart needed.
 
 ## Try it
 
