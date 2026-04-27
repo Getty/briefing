@@ -1,6 +1,6 @@
 {
   "name": "briefing",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Programmatic briefing beats prompt stuffing. Pre-loads declared skills into a subagent's context at spawn time, via a PreToolUse hook on the Agent tool.",
   "author": {
     "name": "Torsten Raudssus",

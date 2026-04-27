@@ -14,7 +14,7 @@ No silent skips. The skills are simply *there* when the agent wakes up.
 1. Subagent is about to spawn — Claude Code calls the hook with the
    `Agent` tool input (`subagent_type`, `prompt`, …).
 2. Hook reads the target agent's markdown file and parses its YAML
-   frontmatter for a `skills:` list.
+   frontmatter for a `briefing.skills` list.
 3. Each skill name is resolved against the same locations Claude Code
    itself uses — project `.claude/skills/`, user `~/.claude/skills/`,
    and plugin caches — including the `plugin:skill` namespaced form.
@@ -32,18 +32,29 @@ No silent skips. The skills are simply *there* when the agent wakes up.
 name: perl-backend-master-and-pipeline
 description: ...
 allowed-tools: Read, Edit, Write, Bash, Glob, Grep
-skills:
-  - perl-core
-  - perl-moose
-  - perl-ai-langertha
-  - perl-io-async-future
-  - perl-firecrawl
-  - perl-localization-with-locale-simple
+briefing:
+  skills:
+    - perl-core
+    - perl-moose
+    - perl-ai-langertha
+    - perl-io-async-future
+    - perl-firecrawl
+    - perl-localization-with-locale-simple
 ---
 ```
 
-The `skills:` key is a custom extension — Claude Code's harness ignores
-it; only `briefing` reads it.
+Everything plugin-specific lives under a single `briefing:` block, so
+we never collide with Claude Code's own frontmatter keys (e.g. a
+hypothetical future top-level `skills:`). The plain top-level
+`skills:` key is intentionally ignored — it's reserved for the
+harness.
+
+A flow-style list works too:
+
+```yaml
+briefing:
+  skills: [perl-core, perl-moose]
+```
 
 ## Install
 
@@ -82,4 +93,5 @@ Stdlib only. No dependencies. CI runs on Python 3.10 / 3.11 / 3.12.
 
 ## Status
 
-v0.1.0 — working hook, hard-fail on missing skills. See `TODO.md`.
+v0.2.0 — working hook with namespaced `briefing.skills` frontmatter,
+hard-fail on missing skills. See `TODO.md` and `CHANGELOG.md`.

@@ -72,7 +72,7 @@ class BriefingHookTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout, "")
 
-    def test_agent_without_skills_key_is_noop(self):
+    def test_agent_without_briefing_block_is_noop(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
             name: demo
@@ -80,6 +80,22 @@ class BriefingHookTests(unittest.TestCase):
             ---
             body
         """)
+        proc = run_hook(self._payload(), fake_home=self.home)
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout, "")
+
+    def test_bare_top_level_skills_key_is_ignored(self):
+        # `skills:` at the top level belongs to Claude Code itself; the
+        # briefing hook MUST NOT read it. Only `briefing.skills` counts.
+        write(self.cwd / ".claude/agents/demo.md", """
+            ---
+            name: demo
+            skills:
+              - foo
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO")
         proc = run_hook(self._payload(), fake_home=self.home)
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout, "")
@@ -105,10 +121,11 @@ class BriefingHookTests(unittest.TestCase):
     def test_block_list_parses(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
-            skills:
-              - foo
-              - "bar"
-              - 'baz'
+            briefing:
+              skills:
+                - foo
+                - "bar"
+                - 'baz'
             ---
             body
         """)
@@ -126,7 +143,8 @@ class BriefingHookTests(unittest.TestCase):
     def test_flow_list_parses(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
-            skills: [foo, "bar", 'baz']
+            briefing:
+              skills: [foo, "bar", 'baz']
             ---
             body
         """)
@@ -140,13 +158,33 @@ class BriefingHookTests(unittest.TestCase):
         self.assertIn("## Skill: bar", prompt)
         self.assertIn("## Skill: baz", prompt)
 
+    def test_briefing_block_coexists_with_other_frontmatter(self):
+        write(self.cwd / ".claude/agents/demo.md", """
+            ---
+            name: demo
+            description: a demo
+            allowed-tools: Read, Bash
+            briefing:
+              skills:
+                - foo
+            model: sonnet
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO BODY")
+        proc = run_hook(self._payload(), fake_home=self.home)
+        out = json.loads(proc.stdout)
+        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        self.assertIn("FOO BODY", prompt)
+
     # --- resolution order ----------------------------------------------
 
     def test_project_beats_user(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
-            skills:
-              - foo
+            briefing:
+              skills:
+                - foo
             ---
             body
         """)
@@ -162,8 +200,9 @@ class BriefingHookTests(unittest.TestCase):
     def test_user_beats_plugin(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
-            skills:
-              - foo
+            briefing:
+              skills:
+                - foo
             ---
             body
         """)
@@ -181,8 +220,9 @@ class BriefingHookTests(unittest.TestCase):
     def test_plugin_cache_resolves(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
-            skills:
-              - foo
+            briefing:
+              skills:
+                - foo
             ---
             body
         """)
@@ -200,8 +240,9 @@ class BriefingHookTests(unittest.TestCase):
     def test_namespaced_skill(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
-            skills:
-              - superpowers:brainstorming
+            briefing:
+              skills:
+                - superpowers:brainstorming
             ---
             body
         """)
@@ -219,8 +260,9 @@ class BriefingHookTests(unittest.TestCase):
     def test_namespaced_skill_nested_owner(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
-            skills:
-              - superpowers:brainstorming
+            briefing:
+              skills:
+                - superpowers:brainstorming
             ---
             body
         """)
@@ -239,9 +281,10 @@ class BriefingHookTests(unittest.TestCase):
     def test_missing_skill_denies(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
-            skills:
-              - foo
-              - missing-one
+            briefing:
+              skills:
+                - foo
+                - missing-one
             ---
             body
         """)
@@ -259,8 +302,9 @@ class BriefingHookTests(unittest.TestCase):
     def test_skill_frontmatter_is_stripped(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
-            skills:
-              - foo
+            briefing:
+              skills:
+                - foo
             ---
             body
         """)

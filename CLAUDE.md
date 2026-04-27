@@ -10,7 +10,8 @@ Ships a single `PreToolUse` hook on the `Agent` tool. When a subagent
 is about to spawn, the hook:
 
 1. Reads the target agent's markdown file (project then user level).
-2. Parses YAML frontmatter for a custom `skills:` list.
+2. Parses YAML frontmatter for a custom `briefing.skills` list (the
+   `briefing:` block reserves all of our keys under one namespace).
 3. Resolves each skill name against project / user / plugin-cache
    skill locations.
 4. Inlines each `SKILL.md` body into a "pre-loaded skills" block and

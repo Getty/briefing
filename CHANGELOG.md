@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.0 — 2026-04-27
+
+**Breaking:** the agent frontmatter key moved from a top-level
+`skills:` list to a nested `briefing.skills` list. The bare
+`skills:` key is now intentionally ignored — it's reserved for
+Claude Code's own future use, and we don't want a semantic
+collision if the harness ever adopts it. Everything plugin-specific
+now lives under a single `briefing:` block, leaving room for future
+options (`briefing.format`, `briefing.max_size`, …) without
+sprinkling `briefing-foo:` keys across the frontmatter.
+
+Migration: replace
+
+```yaml
+skills:
+  - foo
+```
+
+with
+
+```yaml
+briefing:
+  skills:
+    - foo
+```
+
 ## 0.1.0 — 2026-04-27
 
 Initial release.

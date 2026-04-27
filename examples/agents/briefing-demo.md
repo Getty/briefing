@@ -2,8 +2,9 @@
 name: briefing-demo
 description: Minimal demo agent — proves the briefing plugin pre-loads its declared skills before the agent's first thought.
 allowed-tools: Read, Bash
-skills:
-  - briefing-demo-skill
+briefing:
+  skills:
+    - briefing-demo-skill
 ---
 
 You are the briefing demo agent. Your only job:

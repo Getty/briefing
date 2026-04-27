@@ -40,33 +40,66 @@ def split_frontmatter(text):
     return "", text
 
 
-_BLOCK_RE = re.compile(
+_BRIEFING_BLOCK_RE = re.compile(
+    r"^briefing:[ \t]*\r?\n((?:[ \t]+[^\r\n]*(?:\r?\n|$))+)", re.MULTILINE
+)
+_SKILLS_BLOCK_RE = re.compile(
     r"^skills:[ \t]*\r?\n((?:[ \t]*-[ \t]*[^\r\n]+\r?\n?)+)", re.MULTILINE
 )
 _BLOCK_ITEM_RE = re.compile(
     r'^[ \t]*-[ \t]*(["\']?)([^"\'\r\n]+)\1[ \t]*$', re.MULTILINE
 )
-_FLOW_RE = re.compile(r"^skills:[ \t]*\[([^\]\r\n]+)\]", re.MULTILINE)
+_SKILLS_FLOW_RE = re.compile(r"^skills:[ \t]*\[([^\]\r\n]+)\]", re.MULTILINE)
+
+
+def _dedent(block):
+    lines = block.splitlines()
+    indents = [
+        len(l) - len(l.lstrip(" \t")) for l in lines if l.strip()
+    ]
+    if not indents:
+        return block
+    common = min(indents)
+    return "\n".join(l[common:] if len(l) >= common else l for l in lines) + "\n"
 
 
 def parse_skills_list(fm):
+    """Extract the `briefing.skills` list from agent frontmatter.
+
+    Expected shape:
+
+        briefing:
+          skills:
+            - foo
+            - bar:baz
+
+    Flow form (`skills: [foo, bar]`) is also accepted under the
+    `briefing:` block. The bare top-level `skills:` key is reserved
+    for Claude Code itself and is intentionally NOT read here.
+    """
     if not fm:
         return []
 
-    m = _BLOCK_RE.search(fm)
-    if m:
+    m = _BRIEFING_BLOCK_RE.search(fm)
+    if not m:
+        return []
+
+    block = _dedent(m.group(1))
+
+    sm = _SKILLS_BLOCK_RE.search(block)
+    if sm:
         out = []
-        for item in _BLOCK_ITEM_RE.finditer(m.group(1)):
+        for item in _BLOCK_ITEM_RE.finditer(sm.group(1)):
             v = item.group(2).strip()
             if v:
                 out.append(v)
         return out
 
-    m = _FLOW_RE.search(fm)
-    if m:
+    fm_match = _SKILLS_FLOW_RE.search(block)
+    if fm_match:
         return [
             v.strip().strip('"').strip("'")
-            for v in m.group(1).split(",")
+            for v in fm_match.group(1).split(",")
             if v.strip()
         ]
 
