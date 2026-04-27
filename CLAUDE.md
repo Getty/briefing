@@ -28,6 +28,10 @@ chance of the model "forgetting" to load them.
 .claude-plugin/plugin.json   plugin manifest (name, version, description)
 hooks/hooks.json             hook registration (PreToolUse → Agent)
 hooks/briefing-preload       the hook itself (Python 3, executable)
+skills/briefing/SKILL.md     ships with the plugin — teaches Claude
+                             how to author and migrate briefing-aware
+                             agents (anti-patterns, migration recipe,
+                             debugging)
 examples/                    example agent + minimal skill for testing
 tests/                       pytest-style tests (python3 -m unittest)
 README.md                    user-facing intro

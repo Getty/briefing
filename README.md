@@ -69,6 +69,15 @@ The first command registers the marketplace; the second installs the
 `briefing` plugin from it. The hook is active immediately on the next
 `Agent` spawn — no restart needed.
 
+## Authoring briefing-aware agents
+
+The plugin ships with a `briefing` skill that documents how to write
+agents that use it correctly — including the anti-pattern of
+restating skills in the agent body when they're already injected,
+and a recipe for migrating prompt-stuffed agents to declarative
+`briefing.skills`. Once installed, invoke it as `/briefing` (or have
+Claude pick it up automatically when working on agent files).
+
 ## Try it
 
 Drop the example agent + skill into any project:
