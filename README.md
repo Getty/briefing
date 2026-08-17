@@ -58,16 +58,29 @@ briefing:
 
 ## Install
 
-This repo is also a one-plugin marketplace. From inside Claude Code:
+From inside Claude Code, via the shared marketplace that carries every
+Getty plugin:
+
+```
+/plugin marketplace add Getty/claude-code
+/plugin install briefing@getty
+```
+
+The first command registers the marketplace; the second installs the
+`briefing` plugin from it. The hook is active immediately on the next
+`Agent` spawn — no restart needed.
+
+This repo is *also* a one-plugin marketplace, and stays one:
 
 ```
 /plugin marketplace add Getty/briefing
 /plugin install briefing@briefing
 ```
 
-The first command registers the marketplace; the second installs the
-`briefing` plugin from it. The hook is active immediately on the next
-`Agent` spawn — no restart needed.
+Both paths install the same plugin from the same repo and both keep
+receiving updates. The shared marketplace just saves you from
+registering a new one per plugin. If you installed the old way, a
+`SessionStart` hook mentions this once and then never again.
 
 ## Authoring briefing-aware agents
 
