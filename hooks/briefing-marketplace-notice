@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+# briefing — SessionStart hook.
+#
+# Points at Getty/claude-code, the shared marketplace carrying every Getty
+# plugin. Installing from Getty/briefing keeps working and stays maintained:
+# this is a convenience note, not a deprecation.
+#
+# Stays silent whenever it has nothing to add — already installed from the
+# shared marketplace, loaded via --plugin-dir or a checkout, or the note has
+# already been shown once.
+
+import json
+import os
+import sys
+
+MARKETPLACE = "getty"
+MARKETPLACE_REPO = "Getty/claude-code"
+STATE_FILE = "~/.claude/.briefing-marketplace-notice"
+
+NOTICE = (
+    "briefing is now also in the shared Getty marketplace, alongside the other "
+    "plugins: /plugin marketplace add {repo} — then /plugin install briefing@{name}. "
+    "Your install from Getty/briefing keeps working and stays maintained, so there "
+    "is nothing you have to do."
+).format(repo=MARKETPLACE_REPO, name=MARKETPLACE)
+
+
+def installed_marketplace():
+    """Marketplace name from ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>.
+
+    Returns None when this copy did not come from a marketplace at all, which
+    is the case for --plugin-dir and for a local checkout.
+    """
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if not root:
+        return None
+    parts = os.path.normpath(root).split(os.sep)
+    try:
+        return parts[parts.index("cache") + 1]
+    except (ValueError, IndexError):
+        return None
+
+
+def main():
+    current = installed_marketplace()
+    if current is None or current == MARKETPLACE:
+        return
+
+    state = os.path.expanduser(STATE_FILE)
+    if os.path.exists(state):
+        return
+    try:
+        os.makedirs(os.path.dirname(state), exist_ok=True)
+        with open(state, "w", encoding="utf-8") as f:
+            f.write(current + "\n")
+    except OSError:
+        # Cannot record it. Saying it every session beats never saying it.
+        pass
+
+    print(json.dumps({"systemMessage": NOTICE}))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        # A courtesy note must never take a session down.
+        pass
+    sys.exit(0)

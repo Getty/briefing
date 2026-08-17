@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0 — unreleased
+
+- `SessionStart` hook pointing at
+  [`Getty/claude-code`](https://github.com/Getty/claude-code), the shared
+  marketplace that now carries every Getty plugin. It reads the marketplace
+  name out of `CLAUDE_PLUGIN_ROOT`, so it stays silent for anyone already
+  installed from there, for `--plugin-dir`, and for local checkouts — and
+  shows at most once, recorded in `~/.claude/.briefing-marketplace-notice`.
+- This repo's own marketplace stays in place and stays maintained. Both
+  install paths lead to the same plugin; nobody has to migrate.
+- 8 unit tests for the notice hook, covering the silent cases, the
+  once-only behaviour, and an unwritable state directory.
+
 ## 0.1.0 — 2026-04-27
 
 Initial release. Tagged as
