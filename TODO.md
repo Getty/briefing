@@ -31,8 +31,9 @@ Live worklist. Tick as we go.
 
 ## v0.3 — Distribution
 
-- [ ] Marketplace entry — `marketplace.json` style or whichever
-      format Claude Code currently accepts (verify via claude-code-guide).
+- [x] Marketplace entry — this repo is its own one-plugin marketplace and
+      is listed in the shared catalog at Getty/marketplace, in both the
+      Claude Code and the Codex manifest.
 - [x] `CHANGELOG.md` — keep the changelog honest.
 - [x] LICENSE file (Artistic-2.0).
 - [x] CI: GitHub Actions workflow running `python3 -m unittest
@@ -64,8 +65,9 @@ Live worklist. Tick as we go.
 - [x] Abort instruction instead of deny — Codex cannot block a spawn.
 - [x] `.codex-plugin/plugin.json`, same `skills/` and `hooks/`.
 - [x] 11 tests, plus end-to-end verification against Codex 0.147.0.
-- [ ] Verify `codex plugin add` against the marketplace once it is
-      published — only a local file marketplace has been exercised.
+- [x] Verify `codex plugin add` against the marketplace once it is
+      published — installed from Getty/marketplace over GitHub, not just
+      from a local file marketplace.
 - [ ] Decide whether the hard-fail should also fire a `SessionStart`
       pre-flight under Codex, so unresolvable agents surface before
       any spawn burns tokens.
