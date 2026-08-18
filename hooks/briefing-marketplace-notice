@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # briefing — SessionStart hook.
 #
-# Points at Getty/claude-code, the shared marketplace carrying every Getty
+# Points at Getty/marketplace, the shared marketplace carrying every Getty
 # plugin. Installing from Getty/briefing keeps working and stays maintained:
 # this is a convenience note, not a deprecation.
 #
@@ -14,7 +14,7 @@ import os
 import sys
 
 MARKETPLACE = "getty"
-MARKETPLACE_REPO = "Getty/claude-code"
+MARKETPLACE_REPO = "Getty/marketplace"
 STATE_FILE = "~/.claude/.briefing-marketplace-notice"
 
 NOTICE = (

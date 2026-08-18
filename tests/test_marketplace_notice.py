@@ -46,7 +46,7 @@ class MarketplaceNoticeTests(unittest.TestCase):
         proc = run_hook(fake_home=self.home, plugin_root=self.cache_root("briefing"))
         self.assertEqual(proc.returncode, 0)
         payload = json.loads(proc.stdout)
-        self.assertIn("Getty/claude-code", payload["systemMessage"])
+        self.assertIn("Getty/marketplace", payload["systemMessage"])
         self.assertIn("briefing@getty", payload["systemMessage"])
 
     def test_notice_says_the_old_path_keeps_working(self):
@@ -82,7 +82,7 @@ class MarketplaceNoticeTests(unittest.TestCase):
         try:
             proc = run_hook(fake_home=self.home, plugin_root=self.cache_root("briefing"))
             self.assertEqual(proc.returncode, 0)
-            self.assertIn("Getty/claude-code", json.loads(proc.stdout)["systemMessage"])
+            self.assertIn("Getty/marketplace", json.loads(proc.stdout)["systemMessage"])
         finally:
             state_dir.chmod(0o700)
 
