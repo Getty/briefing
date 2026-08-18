@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 — unreleased
+## 0.3.0 — 2026-08-18
 
 Codex support, from the same set of files.
 
@@ -30,7 +30,7 @@ Codex support, from the same set of files.
   identical non-declaring agent did not, and a marker confirmed `SubagentStart`
   reached the hook in both runs.
 
-## 0.2.0 — unreleased
+## 0.2.0 — never tagged, shipped as part of 0.3.0
 
 - `SessionStart` hook pointing at
   [`Getty/marketplace`](https://github.com/Getty/marketplace), the shared
