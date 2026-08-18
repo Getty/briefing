@@ -137,6 +137,151 @@ def resolve_skill(name, cwd, home):
     return None
 
 
+_TOML_BRIEFING_RE = re.compile(
+    r"^\[briefing\][ \t]*\r?\n(.*?)(?=^\[|\Z)", re.MULTILINE | re.DOTALL
+)
+_TOML_SKILLS_RE = re.compile(r"^skills[ \t]*=[ \t]*\[(.*?)\]", re.MULTILINE | re.DOTALL)
+_TOML_ITEM_RE = re.compile(r"""["']([^"']+)["']""")
+
+
+def parse_skills_toml(text):
+    """Extract the `[briefing] skills` list from a Codex agent TOML file.
+
+    Expected shape:
+
+        [briefing]
+        skills = ["foo", "bar:baz"]
+
+    `tomllib` is stdlib only from Python 3.11 and the hook still has to run
+    on older interpreters, so a regex fallback covers the single table and
+    single key we care about.
+    """
+    if not text:
+        return []
+
+    try:
+        import tomllib
+    except ImportError:
+        tomllib = None
+
+    if tomllib is not None:
+        try:
+            doc = tomllib.loads(text)
+        except Exception:
+            return []
+        block = doc.get("briefing")
+        if not isinstance(block, dict):
+            return []
+        skills = block.get("skills")
+        if not isinstance(skills, list):
+            return []
+        return [s.strip() for s in skills if isinstance(s, str) and s.strip()]
+
+    m = _TOML_BRIEFING_RE.search(text)
+    if not m:
+        return []
+    sm = _TOML_SKILLS_RE.search(m.group(1))
+    if not sm:
+        return []
+    return [v.strip() for v in _TOML_ITEM_RE.findall(sm.group(1)) if v.strip()]
+
+
+def resolve_skill_codex(name, cwd, home):
+    """Resolve a skill name against the locations Codex itself searches."""
+    # explicit plugin namespace: plugin:skill — Codex uses the same syntax
+    # as Claude Code, but installs plugins under a versioned cache path.
+    if ":" in name and not name.startswith(":"):
+        plugin, _, skill = name.partition(":")
+        if plugin and skill and " " not in plugin:
+            for pat in (
+                f"{home}/.codex/plugins/cache/*/{plugin}/*/skills/{skill}/SKILL.md",
+                f"{home}/.codex/plugins/cache/{plugin}/*/skills/{skill}/SKILL.md",
+                f"{home}/.codex/plugins/cache/*/{plugin}/skills/{skill}/SKILL.md",
+            ):
+                for g in sorted(glob.glob(pat)):
+                    if os.access(g, os.R_OK):
+                        return g
+            return None
+
+    for base in (
+        f"{cwd}/.agents/skills",
+        f"{cwd}/../.agents/skills",
+        f"{home}/.agents/skills",
+        f"{home}/.codex/skills",
+        "/etc/codex/skills",
+    ):
+        p = f"{base}/{name}/SKILL.md"
+        if os.access(p, os.R_OK):
+            return p
+
+    return None
+
+
+def main_codex(data):
+    """SubagentStart — Codex cannot deny a spawn, so context is all we get."""
+    agent_type = data.get("agent_type") or ""
+    if not agent_type:
+        return 0
+
+    cwd = data.get("cwd") or os.environ.get("PWD") or "."
+    home = os.environ.get("HOME") or ""
+
+    agent_file = find_first_readable(
+        f"{cwd}/.codex/agents/{agent_type}.toml",
+        f"{home}/.codex/agents/{agent_type}.toml",
+    )
+    if not agent_file:
+        return 0
+
+    skills = parse_skills_toml(slurp(agent_file))
+    if not skills:
+        return 0
+
+    blocks = []
+    missing = []
+    for name in skills:
+        path = resolve_skill_codex(name, cwd, home)
+        if not path:
+            missing.append(name)
+            continue
+        _, body = split_frontmatter(slurp(path))
+        blocks.append(f"## Skill: {name}\n\n{body}")
+
+    if missing:
+        names = ", ".join(missing)
+        msg = f"briefing: agent '{agent_type}' references unknown skill(s): {names}"
+        sys.stderr.write(msg + "\n")
+        sys.stdout.write(json.dumps({
+            "systemMessage": msg,
+            "hookSpecificOutput": {
+                "hookEventName": "SubagentStart",
+                "additionalContext": (
+                    "# Briefing — FAILED\n\n"
+                    f"The skills this agent declares could not be loaded: {names}.\n\n"
+                    "You are NOT briefed for this task. Do NOT attempt it and do NOT\n"
+                    "improvise a substitute. Report this exact failure to whoever\n"
+                    "delegated to you, and stop.\n"
+                ),
+            },
+        }))
+        return 0
+
+    header = (
+        "# Briefing — pre-loaded skills\n\n"
+        "The skills below have been injected directly into your context by the\n"
+        "briefing plugin. Treat them as already loaded — do NOT go looking for\n"
+        "their SKILL.md files; their content is already here.\n\n"
+    )
+
+    sys.stdout.write(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "SubagentStart",
+            "additionalContext": header + "\n\n---\n\n".join(blocks),
+        }
+    }))
+    return 0
+
+
 def main():
     raw = sys.stdin.read()
     if not raw:
@@ -148,6 +293,9 @@ def main():
         return 0
     if not isinstance(data, dict):
         return 0
+
+    if data.get("hook_event_name") == "SubagentStart":
+        return main_codex(data)
 
     if data.get("tool_name") != "Agent":
         return 0

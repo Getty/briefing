@@ -53,14 +53,32 @@ Live worklist. Tick as we go.
 - [ ] `briefing doctor` CLI: validate every agent file in a project,
       report any unresolvable skills before they bite at spawn time.
 
+## v0.3 — Codex
+
+- [x] `SubagentStart` branch in the same hook script, keyed on
+      `hook_event_name`.
+- [x] `[briefing]` TOML declaration in `.codex/agents/<name>.toml`,
+      with `tomllib` plus a regex fallback for Python 3.10.
+- [x] Codex skill roots + `plugin:skill` against the Codex plugin cache.
+- [x] `additionalContext` injection with `additionalContextLimit: 0`.
+- [x] Abort instruction instead of deny — Codex cannot block a spawn.
+- [x] `.codex-plugin/plugin.json`, same `skills/` and `hooks/`.
+- [x] 11 tests, plus end-to-end verification against Codex 0.147.0.
+- [ ] Verify `codex plugin add` against the marketplace once it is
+      published — only a local file marketplace has been exercised.
+- [ ] Decide whether the hard-fail should also fire a `SessionStart`
+      pre-flight under Codex, so unresolvable agents surface before
+      any spawn burns tokens.
+
 ## Open design questions
 
 - [ ] Should we strip the skill's frontmatter (`name:`, `description:`,
       …) from the injected body? Currently yes. Some skills carry
       important metadata in description we're throwing away.
-- [ ] Should `additionalContext` be used instead of mutating `prompt`?
-      Pro: preserves the user's prompt verbatim in transcripts.
-      Con: less control over ordering, behavior less documented.
+- [x] Should `additionalContext` be used instead of mutating `prompt`?
+      Under Codex it is the only channel, so both now exist side by
+      side. Claude Code keeps prompt rewriting, which is what allows
+      the hard deny.
 - [ ] How do we want to surface "skill X was pre-loaded" in the
       transcript / UI so the user can audit? Probably a stderr line
       that the harness prints.
