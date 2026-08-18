@@ -119,7 +119,9 @@ looks: `.claude/skills/` for Claude Code, `.agents/skills/` for Codex.
 /plugin install briefing@getty
 ```
 
-This repo is *also* a one-plugin marketplace, and stays one:
+This repo is *also* a one-plugin marketplace for Claude Code. That one is legacy —
+it serves the people who installed briefing before the shared catalog existed, and it
+stays maintained so nobody has to migrate:
 
 ```
 /plugin marketplace add Getty/briefing
@@ -130,18 +132,11 @@ Both paths install the same plugin from the same repo and both keep receiving
 updates. If you installed the old way, a `SessionStart` hook mentions the shared
 marketplace once and then never again.
 
-**Codex**, from the same shared marketplace:
+**Codex**, from the shared marketplace — the only route there:
 
 ```
 codex plugin marketplace add Getty/marketplace
 codex plugin add briefing@getty
-```
-
-Or from this repo alone, which is a marketplace for both harnesses:
-
-```
-codex plugin marketplace add Getty/briefing
-codex plugin add briefing@briefing
 ```
 
 Codex asks you to trust a plugin's hooks before it runs them. Until you do,

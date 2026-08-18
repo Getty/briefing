@@ -31,9 +31,10 @@ Live worklist. Tick as we go.
 
 ## v0.3 — Distribution
 
-- [x] Marketplace entry — this repo is its own one-plugin marketplace and
-      is listed in the shared catalog at Getty/marketplace, in both the
-      Claude Code and the Codex manifest.
+- [x] Marketplace entry — this repo is its own one-plugin marketplace for
+      Claude Code, and is listed in the shared catalog at Getty/marketplace,
+      in both the Claude Code and the Codex manifest. Codex installs only
+      from the shared catalog.
 - [x] `CHANGELOG.md` — keep the changelog honest.
 - [x] LICENSE file (Artistic-2.0).
 - [x] CI: GitHub Actions workflow running `python3 -m unittest
