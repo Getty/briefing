@@ -33,7 +33,7 @@ Codex support, from the same set of files.
 ## 0.2.0 — unreleased
 
 - `SessionStart` hook pointing at
-  [`Getty/claude-code`](https://github.com/Getty/claude-code), the shared
+  [`Getty/marketplace`](https://github.com/Getty/marketplace), the shared
   marketplace that now carries every Getty plugin. It reads the marketplace
   name out of `CLAUDE_PLUGIN_ROOT`, so it stays silent for anyone already
   installed from there, for `--plugin-dir`, and for local checkouts — and

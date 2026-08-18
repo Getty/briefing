@@ -11,5 +11,5 @@
       "description": "Pre-loads declared skills into a subagent's context at spawn time, via a PreToolUse hook on the Agent tool. Programmatic briefing beats prompt stuffing."
     }
   ],
-  "description": "briefing's own one-plugin marketplace. Still maintained. Getty/claude-code carries this plugin alongside the others."
+  "description": "briefing's own one-plugin marketplace. Still maintained. Getty/marketplace carries this plugin alongside the others."
 }

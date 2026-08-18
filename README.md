@@ -115,7 +115,7 @@ looks: `.claude/skills/` for Claude Code, `.agents/skills/` for Codex.
 **Claude Code**, via the shared marketplace that carries every Getty plugin:
 
 ```
-/plugin marketplace add Getty/claude-code
+/plugin marketplace add Getty/marketplace
 /plugin install briefing@getty
 ```
 
@@ -130,7 +130,14 @@ Both paths install the same plugin from the same repo and both keep receiving
 updates. If you installed the old way, a `SessionStart` hook mentions the shared
 marketplace once and then never again.
 
-**Codex**:
+**Codex**, from the same shared marketplace:
+
+```
+codex plugin marketplace add Getty/marketplace
+codex plugin add briefing@getty
+```
+
+Or from this repo alone, which is a marketplace for both harnesses:
 
 ```
 codex plugin marketplace add Getty/briefing
