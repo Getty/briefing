@@ -11,6 +11,17 @@
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-preload",
+            "additionalContextLimit": 0
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

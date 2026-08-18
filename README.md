@@ -2,73 +2,122 @@
 
 > **Programmatic briefing beats prompt stuffing.**
 
-A Claude Code plugin that lets a subagent declare its required skills in
-frontmatter — and guarantees they are loaded *before* the agent thinks
-its first thought. No "MANDATORY: load X first" pleading in the body.
-No silent skips. The skills are simply *there* when the agent wakes up.
+A subagent declares the skills it needs. `briefing` guarantees those skills are
+in its context *before it thinks its first thought* — no "MANDATORY: load X
+first" pleading in the body, no silent skips.
+
+Works in **Claude Code** and **Codex**, from one set of files.
+
+## The problem this solves
+
+Every agent harness that has both subagents and skills has the same gap, and it
+follows from two design decisions that are individually correct:
+
+**Subagents start fresh.** A subagent gets its own context window — that is the
+point of it. Whatever the main agent had read, the subagent has not.
+
+**Skills load lazily.** Skills use progressive disclosure: what sits in the
+context window is a *list* — each skill's name, description, and where to find
+it. The instructions themselves are only read once the agent decides it needs
+them. That keeps the context small, and it works well for an agent browsing a
+menu.
+
+Put the two together and you get an agent that was spawned *because* it needs
+particular expertise, and that must nonetheless discover that expertise on its
+own, from a one-line description, in the middle of a task. Sometimes it does.
+Sometimes it decides the description does not match closely enough and does the
+work uninformed — and nothing in the output says so.
+
+The usual workaround is to write the instruction into the agent's body: *"You
+MUST invoke the perl-core skill before doing anything."* That is prompt
+stuffing. It competes for attention with everything else in the prompt, it
+duplicates content that already exists in a skill, and it degrades quietly.
+
+Codex sharpens the problem. Its own system prompt tells the main agent:
+
+> *"Do not delegate reading, summarizing, or interpreting skill instructions to
+> a subagent."*
+
+So the subagent is not supposed to read the skill — and nothing hands it over
+either.
+
+`briefing` closes the gap mechanically: at spawn time, a hook reads the agent's
+declaration, resolves each skill, and puts the full text into the agent's
+context. The agent wakes up already briefed. If a declared skill cannot be
+found, nothing proceeds on a partial briefing.
 
 ## How it works
 
-`briefing` ships a single `PreToolUse` hook bound to the `Agent` tool:
+| | Claude Code | Codex |
+|---|---|---|
+| Hook event | `PreToolUse` on the `Agent` tool | `SubagentStart` |
+| Agent definition | `.claude/agents/<name>.md` | `.codex/agents/<name>.toml` |
+| Declaration | `briefing.skills` in frontmatter | `[briefing] skills` table |
+| Injection | rewrites the agent's prompt | `additionalContext` |
+| Missing skill | spawn is **denied** | agent starts, told to abort |
 
-1. Subagent is about to spawn — Claude Code calls the hook with the
-   `Agent` tool input (`subagent_type`, `prompt`, …).
-2. Hook reads the target agent's markdown file and parses its YAML
-   frontmatter for a `briefing.skills` list.
-3. Each skill name is resolved against the same locations Claude Code
-   itself uses — project `.claude/skills/`, user `~/.claude/skills/`,
-   and plugin caches — including the `plugin:skill` namespaced form.
-4. Skill bodies are concatenated into a "pre-loaded skills" block and
-   prepended to the agent's prompt. The block tells the agent the
-   skills are already in context and it must NOT call the `Skill`
-   tool for them.
-5. If any declared skill cannot be resolved, the spawn is **denied**
-   with a clear error — no silent drift.
+The last row is not a choice. A `SubagentStart` hook cannot stop a spawn — Codex
+parses `continue: false` for compatibility but ignores it. So under Codex the
+nearest honest equivalent is an agent that starts and refuses: instead of skills
+it receives an instruction not to attempt the task and to report the failure.
 
-## Agent frontmatter
+## Declaring skills
+
+**Claude Code** — under a `briefing:` block in the agent's frontmatter:
 
 ```yaml
 ---
-name: perl-backend-master-and-pipeline
+name: my-agent
 description: ...
-allowed-tools: Read, Edit, Write, Bash, Glob, Grep
+allowed-tools: Read, Edit, Bash
 briefing:
   skills:
     - perl-core
     - perl-moose
-    - perl-ai-langertha
-    - perl-io-async-future
-    - perl-firecrawl
-    - perl-localization-with-locale-simple
+    - superpowers:brainstorming
 ---
+
+You are my-agent. Do the thing.
 ```
 
-Everything plugin-specific lives under a single `briefing:` block, so
-we never collide with Claude Code's own frontmatter keys (e.g. a
-hypothetical future top-level `skills:`). The plain top-level
-`skills:` key is intentionally ignored — it's reserved for the
-harness.
+**Codex** — as a `[briefing]` table in the agent's TOML:
 
-A flow-style list works too:
+```toml
+name = "my_agent"
+description = "..."
+developer_instructions = """
+You are my_agent. Do the thing.
+"""
 
-```yaml
-briefing:
-  skills: [perl-core, perl-moose]
+[briefing]
+skills = ["perl-core", "perl-moose", "superpowers:brainstorming"]
 ```
+
+Same names, same resolution rules, same namespacing — only the file format
+differs, because the two harnesses define agents differently.
+
+Everything lives under a `briefing` namespace so nothing collides with keys the
+harness owns. Two are left alone on purpose: a bare top-level `skills:` in
+Claude Code frontmatter, and Codex's own `[[skills.config]]`. The latter means
+*"this skill is visible to the agent"*, which is not the same as *"preloaded"* —
+reinterpreting it would take away your ability to say one without the other.
+
+Skill names resolve the same way in both worlds:
+
+- **bare** (`perl-core`) — project skills, then user skills, then plugin caches.
+- **namespaced** (`superpowers:brainstorming`) — straight to that plugin's skills.
+
+Only the roots differ, and each side searches exactly where its own harness
+looks: `.claude/skills/` for Claude Code, `.agents/skills/` for Codex.
 
 ## Install
 
-From inside Claude Code, via the shared marketplace that carries every
-Getty plugin:
+**Claude Code**, via the shared marketplace that carries every Getty plugin:
 
 ```
 /plugin marketplace add Getty/claude-code
 /plugin install briefing@getty
 ```
-
-The first command registers the marketplace; the second installs the
-`briefing` plugin from it. The hook is active immediately on the next
-`Agent` spawn — no restart needed.
 
 This repo is *also* a one-plugin marketplace, and stays one:
 
@@ -77,32 +126,39 @@ This repo is *also* a one-plugin marketplace, and stays one:
 /plugin install briefing@briefing
 ```
 
-Both paths install the same plugin from the same repo and both keep
-receiving updates. The shared marketplace just saves you from
-registering a new one per plugin. If you installed the old way, a
-`SessionStart` hook mentions this once and then never again.
+Both paths install the same plugin from the same repo and both keep receiving
+updates. If you installed the old way, a `SessionStart` hook mentions the shared
+marketplace once and then never again.
+
+**Codex**:
+
+```
+codex plugin marketplace add Getty/briefing
+codex plugin add briefing@briefing
+```
+
+Codex asks you to trust a plugin's hooks before it runs them. Until you do,
+`briefing` is installed but silent — no error, no injected context, agents simply
+spawn unbriefed. If skills are not arriving, check the hook trust prompt first.
+Non-interactive runs (`codex exec`) cannot grant that trust at all.
 
 ## Authoring briefing-aware agents
 
-The plugin ships with a `briefing` skill that documents how to write
-agents that use it correctly — including the anti-pattern of
-restating skills in the agent body when they're already injected,
-and a recipe for migrating prompt-stuffed agents to declarative
-`briefing.skills`. Once installed, invoke it as `/briefing` (or have
-Claude pick it up automatically when working on agent files).
+The plugin ships a `briefing` skill documenting how to write agents that use it
+correctly — both declaration formats, the anti-pattern of restating skills in the
+agent body when they are already injected, and a recipe for migrating
+prompt-stuffed agents. Invoke it as `/briefing`, or let the agent pick it up when
+it works on agent files.
 
 ## Try it
-
-Drop the example agent + skill into any project:
 
 ```sh
 cp examples/agents/briefing-demo.md       /your/project/.claude/agents/
 cp -r examples/skills/briefing-demo-skill /your/project/.claude/skills/
 ```
 
-Spawn the `briefing-demo` subagent — it will echo back a magic phrase
-from `briefing-demo-skill/SKILL.md`, proving the skill body was already
-in its context before its first turn.
+Spawn the `briefing-demo` subagent — it echoes a magic phrase from the skill,
+proving the body was in its context before its first turn.
 
 ## Develop
 
@@ -111,12 +167,13 @@ python3 -m py_compile hooks/briefing-preload
 python3 -m unittest discover tests -v
 ```
 
-Stdlib only. No dependencies. CI runs on Python 3.10 / 3.11 / 3.12.
+Stdlib only, no dependencies. CI runs Python 3.10 / 3.11 / 3.12 — the Codex
+branch parses TOML with `tomllib` where it exists and falls back to a small regex
+parser on 3.10, so both paths are exercised across the matrix.
 
 ## Status
 
-[v0.1.0](https://github.com/Getty/briefing/releases/tag/v0.1.0) —
-working hook with namespaced `briefing.skills` frontmatter, hard-fail
-on missing skills. Not submitted to Anthropic's official directory
-yet; install directly from this repo. See `TODO.md` and
-`CHANGELOG.md`.
+Working in both harnesses, verified end to end: a Codex subagent declaring
+`[briefing] skills` answered from skill content it was never told to read, while
+the identical agent without the declaration did not. See `CHANGELOG.md` and
+`TODO.md`.

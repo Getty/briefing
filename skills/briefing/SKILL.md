@@ -1,22 +1,53 @@
 ---
 name: briefing
-description: Author and migrate Claude Code subagents that use the `briefing` plugin — the PreToolUse hook that pre-loads declared skills into the agent's context at spawn time. Use this skill when adding `briefing.skills` to an agent's frontmatter, when refactoring an existing agent away from "MANDATORY: load skill X first" prose, or when debugging why a declared skill is not being resolved.
+description: Author and migrate Claude Code or Codex subagents that use the `briefing` plugin — the spawn-time hook that pre-loads declared skills into the agent's context. Use this skill when adding `briefing.skills` to an agent's frontmatter or a `[briefing]` table to an agent's TOML, when refactoring an existing agent away from "MANDATORY: load skill X first" prose, or when debugging why a declared skill is not being resolved.
 ---
 
 # Authoring agents with `briefing`
 
-`briefing` is a Claude Code plugin that pre-loads skills into a
-subagent's prompt **before its first turn**, via a `PreToolUse` hook
-on the `Agent` tool. The skill bodies are inlined into the prompt the
-moment the subagent is spawned — no `Skill`-tool round-trip, no
-chance of the model "forgetting" to load them.
+`briefing` pre-loads skills into a subagent's context **before its
+first turn**. The skill bodies are there the moment the subagent is
+spawned — no round-trip to load each one, no chance of the model
+"forgetting".
+
+It works in two harnesses, and the difference matters only when you
+write the declaration:
+
+| | Claude Code | Codex |
+|---|---|---|
+| Agent file | `.claude/agents/<name>.md` | `.codex/agents/<name>.toml` |
+| Declaration | `briefing:` frontmatter block | `[briefing]` table |
+| Missing skill | spawn is denied | agent starts, told to abort |
 
 This skill tells you how to write agents that use it correctly, and
 how to convert existing agents that were trying to do this with
 prompt-stuffed pleas like *"MANDATORY: invoke the brainstorming skill
 before doing anything else"*.
 
-## The frontmatter
+## The declaration — Codex
+
+A Codex agent declares its skills in a `[briefing]` table:
+
+```toml
+name = "my_agent"
+description = "..."
+developer_instructions = """
+You are my_agent. Do the thing.
+"""
+
+[briefing]
+skills = ["perl-core", "perl-moose", "superpowers:brainstorming"]
+```
+
+**Do not use Codex's own `[[skills.config]]` for this.** That table
+means "this skill is visible to the agent", which is not the same as
+"preloaded" — `briefing` deliberately leaves it alone so you can say
+one without the other.
+
+Note that Codex agent names take underscores, not hyphens, and the
+file name is the agent name.
+
+## The frontmatter — Claude Code
 
 A briefing-aware agent declares its required skills under a single
 `briefing:` block — not a top-level `skills:` key:
@@ -43,17 +74,31 @@ accepted under the block.
 
 Skill names can be:
 
-- bare (`perl-core`) — resolved against project `.claude/skills/`,
-  then user `~/.claude/skills/`, then plugin caches.
+- bare (`perl-core`) — resolved against project skills, then user
+  skills, then plugin caches.
 - namespaced (`superpowers:brainstorming`) — resolved against the
-  named plugin's cache directly.
+  named plugin's cache directly. Both harnesses use this syntax.
+
+The names are identical in both worlds; only the roots differ. Claude
+Code searches `.claude/skills/` and `~/.claude/skills/`; Codex
+searches `.agents/skills/` (project, parent, repo root), then
+`~/.agents/skills/`, `~/.codex/skills/`, and `/etc/codex/skills/`.
+Each side looks exactly where its own harness looks, which is why a
+bare name stays portable between them.
 
 ## Hard-fail policy
 
-If any declared skill cannot be resolved at spawn time, the
-`Agent` tool call is **denied** with a clear error. There is no
-silent degradation. This is intentional: an agent that needs a
-skill to do its job correctly should not run without that skill.
+If any declared skill cannot be resolved at spawn time, nothing runs
+on a partial briefing. There is no silent degradation. This is
+intentional: an agent that needs a skill to do its job correctly
+should not run without that skill.
+
+Under Claude Code the `Agent` call is **denied** with a clear error.
+Under Codex a hook cannot stop a spawn, so the agent starts and
+receives — instead of any skills, including the ones that *did*
+resolve — an instruction not to attempt the task and to report the
+failure. If a Codex subagent comes back saying it was not briefed,
+that is this policy working, not a bug.
 
 So: declare skills the agent genuinely depends on. Do not pad the
 list "just in case" — every name there becomes a precondition for
@@ -140,10 +185,25 @@ skill(s): Y`:
    relevant guidance into the agent body, or have the agent invoke
    the `Skill` tool itself for genuinely optional context.
 
+### When nothing happens at all under Codex
+
+An agent that spawns with no briefing *and no error* is usually not a
+resolution problem. Codex gates plugin hooks behind a trust prompt,
+and until it is granted the hook is skipped silently. Check that
+first. Non-interactive runs (`codex exec`) cannot grant trust at all,
+so they never brief anything unless started with
+`--dangerously-bypass-hook-trust`.
+
+Also confirm the agent file is where Codex looks — `.codex/agents/`,
+with underscores in the name — and remember that the skill list every
+agent sees carries only names and descriptions. An agent quoting a
+skill's content is not proof the briefing worked; it may simply have
+read the file. To test properly, compare against the same agent with
+the `[briefing]` table removed.
+
 ## What `briefing` does NOT do
 
-- It does not rewrite the *main* session's prompt — only subagent
-  spawns triggered by the `Agent` tool.
+- It does not brief the *main* session — only subagent spawns.
 - It does not replace the `Skill` tool. Skills the subagent
   discovers it needs *during* its run still go through `Skill`
   normally.
