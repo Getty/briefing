@@ -29,7 +29,7 @@ Sometimes it decides the description does not match closely enough and does the
 work uninformed — and nothing in the output says so.
 
 The usual workaround is to write the instruction into the agent's body: *"You
-MUST invoke the perl-core skill before doing anything."* That is prompt
+MUST invoke the getty-perl-core skill before doing anything."* That is prompt
 stuffing. It competes for attention with everything else in the prompt, it
 duplicates content that already exists in a skill, and it degrades quietly.
 
@@ -72,8 +72,8 @@ description: ...
 allowed-tools: Read, Edit, Bash
 briefing:
   skills:
-    - perl-core
-    - perl-moose
+    - getty-perl-core
+    - getty-perl-moose
     - superpowers:brainstorming
 ---
 
@@ -90,7 +90,7 @@ You are my_agent. Do the thing.
 """
 
 [briefing]
-skills = ["perl-core", "perl-moose", "superpowers:brainstorming"]
+skills = ["getty-perl-core", "getty-perl-moose", "superpowers:brainstorming"]
 ```
 
 Same names, same resolution rules, same namespacing — only the file format
@@ -104,7 +104,7 @@ reinterpreting it would take away your ability to say one without the other.
 
 Skill names resolve the same way in both worlds:
 
-- **bare** (`perl-core`) — project skills, then user skills, then plugin caches.
+- **bare** (`getty-perl-core`) — project skills, then user skills, then plugin caches.
 - **namespaced** (`superpowers:brainstorming`) — straight to that plugin's skills.
 
 Only the roots differ, and each side searches exactly where its own harness

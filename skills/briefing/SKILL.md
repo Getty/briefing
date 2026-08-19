@@ -36,7 +36,7 @@ You are my_agent. Do the thing.
 """
 
 [briefing]
-skills = ["perl-core", "perl-moose", "superpowers:brainstorming"]
+skills = ["getty-perl-core", "getty-perl-moose", "superpowers:brainstorming"]
 ```
 
 **Do not use Codex's own `[[skills.config]]` for this.** That table
@@ -59,8 +59,8 @@ description: ...
 allowed-tools: Read, Edit, Bash
 briefing:
   skills:
-    - perl-core
-    - perl-moose
+    - getty-perl-core
+    - getty-perl-moose
     - superpowers:brainstorming
 ---
 
@@ -74,7 +74,7 @@ accepted under the block.
 
 Skill names can be:
 
-- bare (`perl-core`) — resolved against project skills, then user
+- bare (`getty-perl-core`) — resolved against project skills, then user
   skills, then plugin caches.
 - namespaced (`superpowers:brainstorming`) — resolved against the
   named plugin's cache directly. Both harnesses use this syntax.
@@ -114,8 +114,8 @@ write things like:
 
 ```markdown
 You have access to the following skills:
-- perl-core (for Perl best practices)
-- perl-moose (for OO idioms)
+- getty-perl-core (for Perl best practices)
+- getty-perl-moose (for OO idioms)
 - ...
 
 MANDATORY: invoke the brainstorming skill before responding.

@@ -48,8 +48,8 @@ Live worklist. Tick as we go.
       a `<skill name="...">` XML-ish block so the agent can identify
       boundaries unambiguously.
 - [ ] Source `skills:` from `description` text as a fallback (parse
-      the existing prose like `"Loads backend Perl skills (perl-core,
-      perl-moose, ...)"`) — would let existing Goldmine agents work
+      the existing prose like `"Loads backend Perl skills (getty-perl-core,
+      getty-perl-moose, ...)"`) — would let existing Goldmine agents work
       without a frontmatter rewrite. Decide later: probably reject as
       too magical.
 - [ ] `briefing doctor` CLI: validate every agent file in a project,
