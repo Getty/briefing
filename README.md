@@ -179,3 +179,10 @@ Working in both harnesses, verified end to end: a Codex subagent declaring
 `[briefing] skills` answered from skill content it was never told to read, while
 the identical agent without the declaration did not. See `CHANGELOG.md` and
 `TODO.md`.
+
+## License
+
+Copyright (c) 2026 Torsten Raudssus.
+
+This is free software; you can redistribute it and/or modify it under the
+terms of the [Artistic License 2.0](LICENSE).
