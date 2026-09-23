@@ -1,6 +1,6 @@
 ---
 name: briefing
-description: Author and migrate Claude Code or Codex subagents that use the `briefing` plugin — the spawn-time hook that pre-loads declared skills into the agent's context. Use this skill when adding `briefing.skills` to an agent's frontmatter or a `[briefing]` table to an agent's TOML, when refactoring an existing agent away from "MANDATORY: load skill X first" prose, or when debugging why a declared skill is not being resolved.
+description: Author and migrate Claude Code or Codex subagents that use the `briefing` plugin — the spawn-time hook that pre-loads declared skills into the agent's context. Use this skill when adding `briefing.skills` to an agent's frontmatter or a `# briefing: skills = [...]` comment to an agent's TOML, when refactoring an existing agent away from "MANDATORY: load skill X first" prose, or when debugging why a declared skill is not being resolved.
 ---
 
 # Authoring agents with `briefing`
@@ -16,7 +16,7 @@ write the declaration:
 | | Claude Code | Codex |
 |---|---|---|
 | Agent file | `.claude/agents/<name>.md` | `.codex/agents/<name>.toml` |
-| Declaration | `briefing:` frontmatter block | `[briefing]` table |
+| Declaration | `briefing:` frontmatter block | `# briefing:` comment |
 | Missing skill | spawn is denied | agent starts, told to abort |
 
 This skill tells you how to write agents that use it correctly, and
@@ -26,26 +26,37 @@ before doing anything else"*.
 
 ## The declaration — Codex
 
-A Codex agent declares its skills in a `[briefing]` table:
+A Codex agent declares its skills in a comment line:
 
 ```toml
 name = "my_agent"
 description = "..."
+# briefing: skills = ["getty-perl-core", "getty-perl-moose", "superpowers:brainstorming"]
 developer_instructions = """
 You are my_agent. Do the thing.
 """
-
-[briefing]
-skills = ["getty-perl-core", "getty-perl-moose", "superpowers:brainstorming"]
 ```
+
+**Never write a `[briefing]` table.** Codex deserializes agent files
+strictly and ignores the whole agent over an unknown key — the table
+form of briefing 0.3.0 now yields ``unknown field `briefing` `` and an
+agent that simply does not exist. The comment is invisible to Codex.
+One line, outside any multi-line string: a `# briefing:` line inside
+`developer_instructions` is prose and is not read.
+
+To migrate an old agent, delete the `[briefing]` table and put its
+list into the comment verbatim. The hook still reads a leftover table
+where an older Codex lets the agent spawn, and says so in a
+`systemMessage`.
 
 **Do not use Codex's own `[[skills.config]]` for this.** That table
 means "this skill is visible to the agent", which is not the same as
 "preloaded" — `briefing` deliberately leaves it alone so you can say
 one without the other.
 
-Note that Codex agent names take underscores, not hyphens, and the
-file name is the agent name.
+Note that Codex agent names take underscores, not hyphens. Codex
+itself takes the role name from `name`, but the hook finds the file
+by that name — keep the file called `<name>.toml`.
 
 ## The frontmatter — Claude Code
 
@@ -199,7 +210,11 @@ with underscores in the name — and remember that the skill list every
 agent sees carries only names and descriptions. An agent quoting a
 skill's content is not proof the briefing worked; it may simply have
 read the file. To test properly, compare against the same agent with
-the `[briefing]` table removed.
+the `# briefing:` line removed.
+
+If the agent is not offered at all, look for Codex's startup warning
+`Ignoring malformed agent role definition` — a leftover `[briefing]`
+table produces exactly that.
 
 ## What `briefing` does NOT do
 

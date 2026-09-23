@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.1 — 2026-09-23
+
+Codex agents declare their skills in a comment now, because Codex 0.153 no
+longer tolerates the table.
+
+- Codex deserializes agent files strictly and drops the **whole agent** over a
+  key it does not know: ``Ignoring malformed agent role definition … unknown
+  field `briefing` ``. The `[briefing]` table introduced in 0.3.0 did exactly
+  that on Codex 0.153.4 — the agent silently vanished, and with it the briefing.
+- The declaration is now a comment line, invisible to Codex and every other
+  TOML parser:
+
+  ```toml
+  # briefing: skills = ["getty-perl-core", "superpowers:brainstorming"]
+  ```
+
+  A matching line inside a multi-line string such as `developer_instructions`
+  is prose and is not read.
+- A leftover `[briefing]` table is still honoured where an older Codex spawns
+  the agent at all, and the hook adds a `systemMessage` asking for the move to
+  the comment form. If both are present, the comment wins.
+- 7 new unit tests; suite green on Python 3.8, 3.10 and 3.13. Verified end to
+  end against Codex 0.153.4: the declaring agent answered with a passphrase that
+  existed only in the skill body, without a single tool call; the identical
+  agent without the comment answered `UNKNOWN`; a marker in the installed hook
+  recorded `SubagentStart` for both.
+
 ## 0.3.0 — 2026-08-18
 
 Codex support, from the same set of files.

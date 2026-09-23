@@ -137,6 +137,62 @@ def resolve_skill(name, cwd, home):
     return None
 
 
+_TOML_COMMENT_RE = re.compile(
+    r"^[ \t]*#[ \t]*briefing:[ \t]*skills[ \t]*=[ \t]*\[([^\]\r\n]*)\]"
+)
+
+
+def _toml_string_state(line, state):
+    """Return the open multi-line string delimiter at the end of `line`.
+
+    `state` is the delimiter open at the start of the line, or None. Just
+    enough of a TOML lexer to tell a comment from a line of prose inside a
+    multi-line `developer_instructions` string.
+    """
+    i, n = 0, len(line)
+    while i < n:
+        if state is None:
+            c = line[i]
+            if c == "#":
+                break
+            if line.startswith('"""', i) or line.startswith("'''", i):
+                state = line[i:i + 3]
+                i += 3
+                continue
+            if c in "\"'":
+                i += 1
+                while i < n and line[i] != c:
+                    i += 2 if (c == '"' and line[i] == "\\") else 1
+            i += 1
+            continue
+        if state == '"""' and line[i] == "\\":
+            i += 2
+            continue
+        if line.startswith(state, i):
+            state = None
+            i += 3
+            continue
+        i += 1
+    return state
+
+
+def parse_skills_comment(text):
+    """Extract the skill list from a `# briefing: skills = [...]` comment.
+
+    Codex rejects agent files carrying keys it does not know, so the
+    declaration lives in a comment every TOML parser ignores. Lines inside
+    multi-line strings are prose, not declarations.
+    """
+    state = None
+    for line in (text or "").splitlines():
+        if state is None:
+            m = _TOML_COMMENT_RE.match(line)
+            if m:
+                return [v.strip() for v in _TOML_ITEM_RE.findall(m.group(1)) if v.strip()]
+        state = _toml_string_state(line, state)
+    return []
+
+
 _TOML_BRIEFING_RE = re.compile(
     r"^\[briefing\][ \t]*\r?\n(.*?)(?=^\[|\Z)", re.MULTILINE | re.DOTALL
 )
@@ -145,12 +201,16 @@ _TOML_ITEM_RE = re.compile(r"""["']([^"']+)["']""")
 
 
 def parse_skills_toml(text):
-    """Extract the `[briefing] skills` list from a Codex agent TOML file.
+    """Extract the legacy `[briefing] skills` list from a Codex agent TOML file.
 
     Expected shape:
 
         [briefing]
         skills = ["foo", "bar:baz"]
+
+    Codex 0.153 drops any agent file carrying this table ("unknown field
+    `briefing`"), so it is read only to keep older setups briefed and to
+    tell their owners to move to the comment form.
 
     `tomllib` is stdlib only from Python 3.11 and the hook still has to run
     on older interpreters, so a regex fallback covers the single table and
@@ -233,9 +293,20 @@ def main_codex(data):
     if not agent_file:
         return 0
 
-    skills = parse_skills_toml(slurp(agent_file))
+    text = slurp(agent_file)
+    legacy = parse_skills_toml(text)
+    skills = parse_skills_comment(text) or legacy
     if not skills:
         return 0
+
+    notes = []
+    if legacy:
+        notes.append(
+            f"briefing: {agent_file} declares skills in a [briefing] table. "
+            "Codex 0.153+ rejects that as an unknown field and ignores the whole "
+            "agent. Replace the table with a comment line: "
+            "# briefing: skills = [...]"
+        )
 
     blocks = []
     missing = []
@@ -252,7 +323,7 @@ def main_codex(data):
         msg = f"briefing: agent '{agent_type}' references unknown skill(s): {names}"
         sys.stderr.write(msg + "\n")
         sys.stdout.write(json.dumps({
-            "systemMessage": msg,
+            "systemMessage": "\n".join([msg] + notes),
             "hookSpecificOutput": {
                 "hookEventName": "SubagentStart",
                 "additionalContext": (
@@ -273,12 +344,16 @@ def main_codex(data):
         "their SKILL.md files; their content is already here.\n\n"
     )
 
-    sys.stdout.write(json.dumps({
+    out = {
         "hookSpecificOutput": {
             "hookEventName": "SubagentStart",
             "additionalContext": header + "\n\n---\n\n".join(blocks),
         }
-    }))
+    }
+    if notes:
+        sys.stderr.write("\n".join(notes) + "\n")
+        out["systemMessage"] = "\n".join(notes)
+    sys.stdout.write(json.dumps(out))
     return 0
 
 

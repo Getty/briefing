@@ -29,7 +29,7 @@ declaration and emitting the result is shared.
 |---|---|---|
 | Event | `PreToolUse`, matcher `Agent` | `SubagentStart` |
 | Agent file | `<cwd>/.claude/agents/<subagent_type>.md` | `<cwd>/.codex/agents/<agent_type>.toml` |
-| Declaration | `briefing.skills` in YAML frontmatter | `[briefing] skills` TOML table |
+| Declaration | `briefing.skills` in YAML frontmatter | `# briefing: skills = [...]` TOML comment |
 | Output | `updatedInput` with a rewritten `prompt` | `additionalContext` |
 | Missing skill | `permissionDecision: deny` | abort instruction + `systemMessage` |
 
@@ -40,7 +40,18 @@ task and to report the failure. Do not "improve" this into a partial briefing �
 a half-briefed agent producing plausible output is exactly the failure mode this
 plugin exists to prevent.
 
-## Three traps specific to the Codex side
+## Four traps specific to the Codex side
+
+**The declaration must be a comment.** Codex deserializes agent files with
+`deny_unknown_fields` (`RawAgentRoleFileToml`, which flattens `ConfigToml`) and
+drops the *whole* agent over a key it does not know — warning ``Ignoring
+malformed agent role definition … unknown field `briefing` ``. The `[briefing]`
+table of 0.3.0 hits exactly that on Codex 0.153. `ConfigToml` has no free-form
+namespace to hide in, and a sidecar `.toml` under `.codex/agents/` would itself
+be loaded as an agent (discovery takes every `*.toml`, recursively). Hence
+`# briefing: skills = [...]`, found by `parse_skills_comment`, which skips lines
+inside multi-line strings. The legacy table is still read — with a
+`systemMessage` telling the owner to migrate — because older Codex spawns it.
 
 **`additionalContextLimit` must be `0`.** The default threshold is about 2500
 tokens; above it Codex writes the hook's output to disk and sends the model a
@@ -55,10 +66,10 @@ output. Non-interactive runs (`codex exec`) cannot grant it at all, which makes
 `--dangerously-bypass-hook-trust` is passed. Debugging a "briefing does nothing"
 report starts here, not in the code.
 
-**`tomllib` is Python 3.11+.** CI still runs 3.10, so `parse_skills_toml` tries
-`tomllib` and falls back to a regex that understands exactly one table and one
-key. The import is *inside* the function, so the Claude Code path never pays for
-it and still runs on 3.8. `tests/test_briefing_codex.py` forces the fallback by
+**`tomllib` is Python 3.11+.** CI still runs 3.10, so `parse_skills_toml` (the
+legacy table) tries `tomllib` and falls back to a regex that understands exactly
+one table and one key. The comment form needs neither. The import is *inside*
+the function, so the Claude Code path never pays for it and still runs on 3.8. `tests/test_briefing_codex.py` forces the fallback by
 putting a `tomllib.py` that raises `ImportError` on `PYTHONPATH` — without that
 shim the fallback would never be exercised on a modern interpreter.
 

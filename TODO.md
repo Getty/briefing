@@ -69,6 +69,11 @@ Live worklist. Tick as we go.
 - [x] Verify `codex plugin add` against the marketplace once it is
       published — installed from Getty/marketplace over GitHub, not just
       from a local file marketplace.
+- [x] Move the Codex declaration into a `# briefing: skills = [...]`
+      comment — Codex 0.153 rejects agent files with a `[briefing]` table
+      (karr #1). Legacy table still read, with a migration warning.
+- [ ] Find Codex agent files by their `name` field, not only by file name,
+      and honour `CODEX_HOME` instead of assuming `~/.codex`.
 - [ ] Decide whether the hard-fail should also fire a `SessionStart`
       pre-flight under Codex, so unresolvable agents surface before
       any spawn burns tokens.

@@ -52,7 +52,7 @@ found, nothing proceeds on a partial briefing.
 |---|---|---|
 | Hook event | `PreToolUse` on the `Agent` tool | `SubagentStart` |
 | Agent definition | `.claude/agents/<name>.md` | `.codex/agents/<name>.toml` |
-| Declaration | `briefing.skills` in frontmatter | `[briefing] skills` table |
+| Declaration | `briefing.skills` in frontmatter | `# briefing: skills = [...]` comment |
 | Injection | rewrites the agent's prompt | `additionalContext` |
 | Missing skill | spawn is **denied** | agent starts, told to abort |
 
@@ -80,18 +80,25 @@ briefing:
 You are my-agent. Do the thing.
 ```
 
-**Codex** — as a `[briefing]` table in the agent's TOML:
+**Codex** — as a `# briefing:` comment line in the agent's TOML:
 
 ```toml
 name = "my_agent"
 description = "..."
+# briefing: skills = ["getty-perl-core", "getty-perl-moose", "superpowers:brainstorming"]
 developer_instructions = """
 You are my_agent. Do the thing.
 """
-
-[briefing]
-skills = ["getty-perl-core", "getty-perl-moose", "superpowers:brainstorming"]
 ```
+
+It is a comment because it has to be. Codex reads agent files strictly and
+drops the whole agent over any key it does not know — a `[briefing]` table, the
+form used up to 0.3.0, makes Codex 0.153 ignore the agent with ``unknown field
+`briefing` ``. A comment is invisible to Codex and every other TOML parser. Keep
+the declaration on one line, outside any multi-line string; a matching line
+inside `developer_instructions` is prose and is not read. The hook still reads
+an old `[briefing]` table where Codex lets the agent spawn at all, and tells you
+to migrate it.
 
 Same names, same resolution rules, same namespacing — only the file format
 differs, because the two harnesses define agents differently.
@@ -176,7 +183,7 @@ parser on 3.10, so both paths are exercised across the matrix.
 ## Status
 
 Working in both harnesses, verified end to end: a Codex subagent declaring
-`[briefing] skills` answered from skill content it was never told to read, while
+`briefing` skills answered from skill content it was never told to read, while
 the identical agent without the declaration did not. See `CHANGELOG.md` and
 `TODO.md`.
 

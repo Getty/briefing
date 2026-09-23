@@ -83,10 +83,8 @@ class CodexHookTests(unittest.TestCase):
         self._agent("""
             name = "demo"
             description = "x"
+            # briefing: skills = ["demo-skill"]
             developer_instructions = "do things"
-
-            [briefing]
-            skills = ["demo-skill"]
         """)
         self._skill("demo-skill", "The body of the demo skill.\n")
 
@@ -101,9 +99,7 @@ class CodexHookTests(unittest.TestCase):
     def test_skill_resolves_from_user_agents_root(self):
         self._agent("""
             name = "demo"
-
-            [briefing]
-            skills = ["user-skill"]
+            # briefing: skills = ["user-skill"]
         """)
         self._skill("user-skill", "From the user root.\n", root=self.home / ".agents/skills")
 
@@ -114,9 +110,7 @@ class CodexHookTests(unittest.TestCase):
     def test_project_root_wins_over_user_root(self):
         self._agent("""
             name = "demo"
-
-            [briefing]
-            skills = ["dup"]
+            # briefing: skills = ["dup"]
         """)
         self._skill("dup", "PROJECT COPY\n")
         self._skill("dup", "USER COPY\n", root=self.home / ".agents/skills")
@@ -131,9 +125,7 @@ class CodexHookTests(unittest.TestCase):
         # Claude Code, and installs them under a versioned cache path.
         self._agent("""
             name = "demo"
-
-            [briefing]
-            skills = ["someplugin:tool"]
+            # briefing: skills = ["someplugin:tool"]
         """)
         write(
             self.home / ".codex/plugins/cache/mp/someplugin/1.2.3/skills/tool/SKILL.md",
@@ -151,9 +143,7 @@ class CodexHookTests(unittest.TestCase):
         # hard fail is an agent that starts and refuses to work.
         self._agent("""
             name = "demo"
-
-            [briefing]
-            skills = ["gone"]
+            # briefing: skills = ["gone"]
         """)
 
         out = self._out(run_hook(self._payload(), fake_home=self.home))
@@ -167,9 +157,7 @@ class CodexHookTests(unittest.TestCase):
     def test_one_missing_skill_aborts_even_when_others_resolve(self):
         self._agent("""
             name = "demo"
-
-            [briefing]
-            skills = ["present", "absent"]
+            # briefing: skills = ["present", "absent"]
         """)
         self._skill("present", "SHOULD NOT BE USED AS A BRIEFING\n")
 
@@ -193,7 +181,7 @@ class CodexHookTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout, "")
 
-    def test_agent_without_briefing_table_is_noop(self):
+    def test_agent_without_briefing_declaration_is_noop(self):
         self._agent("""
             name = "demo"
             description = "x"
@@ -218,9 +206,112 @@ class CodexHookTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout, "")
 
+    # --- where the declaration lives ---------------------------------------
+
+    def test_declaration_comment_inside_multiline_string_is_ignored(self):
+        # A `# briefing:` line inside developer_instructions is prompt text,
+        # not a declaration — e.g. an agent whose instructions explain briefing.
+        self._agent('''
+            name = "demo"
+            developer_instructions = """
+            # briefing: skills = ["quoted-only"]
+            """
+        ''')
+        self._skill("quoted-only", "MUST NOT BE INJECTED\n")
+
+        proc = run_hook(self._payload(), fake_home=self.home)
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout, "")
+
+    def test_declaration_comment_after_multiline_string_is_read(self):
+        self._agent('''
+            name = "demo"
+            developer_instructions = """
+            do things
+            """
+            # briefing: skills = ["late"]
+        ''')
+        self._skill("late", "LATE OK\n")
+
+        ctx = self._out(run_hook(self._payload(), fake_home=self.home))["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("LATE OK", ctx)
+
+    def test_legacy_briefing_table_still_briefs_but_warns(self):
+        # Codex 0.147 accepted a [briefing] table; 0.153 rejects the whole
+        # agent file over it ("unknown field `briefing`"). Where it still
+        # spawns, brief it — and tell the human to migrate.
+        self._agent("""
+            name = "demo"
+
+            [briefing]
+            skills = ["legacy"]
+        """)
+        self._skill("legacy", "LEGACY BODY\n")
+
+        out = self._out(run_hook(self._payload(), fake_home=self.home))
+
+        self.assertIn("LEGACY BODY", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("[briefing]", out["systemMessage"])
+        self.assertIn("# briefing: skills", out["systemMessage"])
+
+    def test_comment_wins_over_legacy_table(self):
+        self._agent("""
+            name = "demo"
+            # briefing: skills = ["new"]
+
+            [briefing]
+            skills = ["old"]
+        """)
+        self._skill("new", "NEW BODY\n")
+        self._skill("old", "OLD BODY\n")
+
+        out = self._out(run_hook(self._payload(), fake_home=self.home))
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("NEW BODY", ctx)
+        self.assertNotIn("OLD BODY", ctx)
+        self.assertIn("[briefing]", out["systemMessage"])
+
+    def test_comment_form_needs_no_warning(self):
+        self._agent("""
+            name = "demo"
+            # briefing: skills = ["quiet"]
+        """)
+        self._skill("quiet", "QUIET\n")
+
+        out = self._out(run_hook(self._payload(), fake_home=self.home))
+
+        self.assertNotIn("systemMessage", out)
+
     # --- the tomllib-less interpreter (CI still runs Python 3.10) ---------
 
-    def test_declaration_is_parsed_without_tomllib(self):
+    def test_comment_declaration_is_parsed_without_tomllib(self):
+        shim = self.root / "notoml"
+        write(shim / "tomllib.py", "raise ImportError('blocked for test')\n")
+        self._agent('''
+            name = "demo"
+            developer_instructions = """
+            # briefing: skills = ["must-not-be-read"]
+            """
+            # briefing: skills = ["double", 'single']
+        ''')
+        self._skill("double", "DOUBLE OK\n")
+        self._skill("single", "SINGLE OK\n")
+
+        env = {**os.environ, "HOME": str(self.home), "PYTHONPATH": str(shim)}
+        proc = subprocess.run(
+            ["python3", str(HOOK)],
+            input=json.dumps(self._payload()),
+            capture_output=True, text=True, env=env, timeout=10,
+        )
+
+        ctx = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("DOUBLE OK", ctx)
+        self.assertIn("SINGLE OK", ctx)
+        self.assertNotIn("must-not-be-read", ctx)
+
+    def test_legacy_table_is_parsed_without_tomllib(self):
         shim = self.root / "notoml"
         write(shim / "tomllib.py", "raise ImportError('blocked for test')\n")
         self._agent("""
