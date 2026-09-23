@@ -1,0 +1,6 @@
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":1,"ts":"2026-09-23T02:58:53Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":1,"ts":"2026-09-23T03:30:04Z"}
+{"action":"move","agent":"briefing","detail":"review","task_id":1,"ts":"2026-09-23T03:30:23Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":2,"ts":"2026-09-23T03:30:28Z"}
+{"action":"move","agent":"briefing","detail":"done","task_id":1,"ts":"2026-09-23T18:01:12Z"}
+{"action":"move","agent":"briefing","detail":"done","task_id":2,"ts":"2026-09-23T18:01:12Z"}
