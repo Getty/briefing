@@ -183,11 +183,27 @@ test must be built so it cannot pass for the wrong reason:
   produce it. Skills are listed to every agent by name and description, so a
   tempting description invites the agent to just go read the file itself — which
   looks exactly like success.
+- **Make sure Codex loaded the project at all.** Project `.codex/` layers —
+  agents included — load only for trusted projects, and trust on an ancestor
+  such as `$HOME` does not cover a separate git repo below it. Without it Codex
+  offers no roles and spawns `default`, which looks exactly like a broken
+  briefing. `--dangerously-bypass-hook-trust` does not help here. Grant it per
+  run with `-c 'projects={"<abs path>"={trust_level="trusted"}}'`; the dotted
+  form `projects."<path>".trust_level=...` is silently ignored. The marker's
+  `agent_type` tells the two apart.
+- **Never copy `auth.json` into a second `CODEX_HOME`.** Use the real one and
+  pass everything else via `-c`. Two homes sharing one refresh token can end
+  the login.
 - **Instrument the installed copy, not the repo.** Appending a marker that logs
   `hook_event_name` to the cached plugin under `~/.codex/plugins/cache/` proves
   which events actually arrive.
 
-This is how the current implementation was verified: the declaring agent answered
+The agent lookup was verified the same way on Codex 0.153.4 — a role whose file
+name differs from its `name` inside `agents/team/`, the same role spawned from a
+subdirectory of the repo, and a role declared via `config_file` all answered
+with the phrase; the control answered `UNKNOWN`.
+
+The original implementation was verified like this: the declaring agent answered
 with the phrase, the identical non-declaring agent answered "unknown", and the
 marker recorded `SubagentStart` in both runs.
 

@@ -42,7 +42,9 @@ longer tolerates the table.
   end against Codex 0.153.4: the declaring agent answered with a passphrase that
   existed only in the skill body, without a single tool call; the identical
   agent without the comment answered `UNKNOWN`; a marker in the installed hook
-  recorded `SubagentStart` for both.
+  recorded `SubagentStart` for both. The new agent lookup passed the same test
+  live: a renamed file in `agents/team/`, a spawn from a repo subdirectory, and
+  a `config_file` role were all briefed.
 
 ## 0.3.0 — 2026-08-18
 
