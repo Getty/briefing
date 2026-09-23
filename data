@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-09-23T18:01:12Z
+claimed_by: briefing
+class: standard
+completed: 2026-09-23T18:01:12Z
+created: 2026-09-23T02:58:53Z
+id: 1
+priority: high
+started: 2026-09-23T03:30:23Z
+status: done
+tags:
+- codex
+- bug
+title: Codex 0.153.4 rejects agent TOML with a [briefing] table (unknown field)
+updated: 2026-09-23T18:01:12Z
+---
+
+Measured 2026-09-23 while building Codex agent support in skilletor (Getty/skilletor k40, commit 2ca9bb1), Codex CLI 0.153.4, temp CODEX_HOME, offline via `codex app-server` config/read:
+
+Codex deserializes agent role files strictly and drops the WHOLE agent on unknown keys. Warning verbatim:
+  Ignoring malformed agent role definition: failed to deserialize agent role file at …: unknown field 'briefing'
+Happens in $CODEX_HOME/agents and in a trusted project's .codex/agents alike.
+
+briefing's README documents `[briefing] skills = [...]` in Codex agent TOML and the CHANGELOG says it was verified end to end on Codex 0.147 — on 0.153.4 such an agent is silently ignored, so neither the agent nor the preload works.
+
+To do: reproduce on current Codex; find a place for the skill list Codex tolerates (e.g. a sidecar file next to the agent, a comment/marker inside developer_instructions, or a separate briefing config keyed by agent name) and migrate the docs; consider a warning in the hook when an agent file carries [briefing]. skilletor currently omits briefing.skills for Codex (switch: CODEX_BRIEFING_TABLE in skilletor src/convert.ts) and will follow whatever briefing settles on.
+
+2026-09-23 03:30 Fixed in 4e139b7 (0.3.1): declaration is now a comment line `# briefing: skills = [...]` — Codex reads agent files with deny_unknown_fields (RawAgentRoleFileToml flattens ConfigToml, no free-form namespace; sidecar .toml would load as an agent). Legacy [briefing] still read + systemMessage warning; comment wins. Verified live on Codex 0.153.4 with control agent. skilletor: emit the comment line instead of the table (CODEX_BRIEFING_TABLE in src/convert.ts).
