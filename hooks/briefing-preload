@@ -15,6 +15,22 @@ import re
 import sys
 
 
+# Above this many bytes of injected skill text the spawn still goes ahead,
+# but the human hears about it: that much context is rarely intended.
+BUDGET_BYTES = 64 * 1024
+
+
+def size_note(agent, briefing):
+    size = len(briefing.encode("utf-8"))
+    if size <= BUDGET_BYTES:
+        return None
+    return (
+        f"briefing: agent '{agent}' is briefed with {size // 1024} kB of skill "
+        f"text (over {BUDGET_BYTES // 1024} kB) — consider declaring fewer or "
+        "smaller skills."
+    )
+
+
 def slurp(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -246,30 +262,157 @@ def parse_skills_toml(text):
     return [v.strip() for v in _TOML_ITEM_RE.findall(sm.group(1)) if v.strip()]
 
 
+_TOML_NAME_RE = re.compile(r"""^[ \t]*name[ \t]*=[ \t]*(?:"([^"\\]*)"|'([^']*)')""")
+_TOML_HEADER_RE = re.compile(r"^[ \t]*\[")
+
+
+def parse_toml_name(text):
+    """Return the top-level `name` of an agent file, or None."""
+    state = None
+    for line in (text or "").splitlines():
+        if state is None:
+            if _TOML_HEADER_RE.match(line):
+                return None
+            m = _TOML_NAME_RE.match(line)
+            if m:
+                return m.group(1) if m.group(1) is not None else m.group(2)
+        state = _toml_string_state(line, state)
+    return None
+
+
+def codex_home_dir(home):
+    return os.environ.get("CODEX_HOME") or f"{home}/.codex"
+
+
+def project_dirs(cwd):
+    """Directories from cwd up to the project root, nearest first.
+
+    Codex treats each of them as a config layer. The root is the nearest
+    directory holding `.git` (Codex's default `project_root_markers`);
+    without one, cwd stands alone.
+    """
+    cwd = os.path.abspath(cwd)
+    dirs = []
+    d = cwd
+    while True:
+        dirs.append(d)
+        if os.path.exists(os.path.join(d, ".git")):
+            return dirs
+        parent = os.path.dirname(d)
+        if parent == d:
+            return [cwd]
+        d = parent
+
+
+def declared_role_file(layer, agent_type):
+    """Return the `config_file` that `<layer>/config.toml` declares for a role.
+
+    Codex lets `[agents.<name>] config_file = "..."` point at a role file
+    anywhere; relative paths resolve against the config.toml's directory.
+    """
+    text = slurp(f"{layer}/config.toml")
+    if not text:
+        return None
+
+    try:
+        import tomllib
+    except ImportError:
+        tomllib = None
+
+    config_file = None
+    if tomllib is not None:
+        try:
+            role = tomllib.loads(text).get("agents", {}).get(agent_type)
+        except Exception:
+            return None
+        if isinstance(role, dict) and isinstance(role.get("config_file"), str):
+            config_file = role["config_file"]
+    else:
+        header = re.compile(
+            r"^\[agents\.(?:%s|\"%s\")\][ \t]*\r?\n(.*?)(?=^\[|\Z)"
+            % (re.escape(agent_type), re.escape(agent_type)),
+            re.MULTILINE | re.DOTALL,
+        )
+        m = header.search(text)
+        if m:
+            cm = re.search(
+                r"""^config_file[ \t]*=[ \t]*(?:"([^"]*)"|'([^']*)')""",
+                m.group(1), re.MULTILINE,
+            )
+            if cm:
+                config_file = cm.group(1) if cm.group(1) is not None else cm.group(2)
+
+    if not config_file:
+        return None
+    return os.path.join(layer, os.path.expanduser(config_file))
+
+
+def find_codex_agent(agent_type, cwd, home):
+    """Find the agent file Codex would load for `agent_type`.
+
+    Codex takes the role name from the `name` field and discovers every
+    `*.toml` below each `agents/` directory, recursively — project layers
+    nearest first, then CODEX_HOME, then the system layer. Within a layer
+    a role declared in config.toml wins. `<name>.toml` is only the fast
+    path.
+    """
+    layers = [f"{d}/.codex" for d in project_dirs(cwd)]
+    layers += [codex_home_dir(home), "/etc/codex"]
+    for layer in layers:
+        declared = declared_role_file(layer, agent_type)
+        if declared and find_first_readable(declared):
+            return declared, slurp(declared)
+
+        root = f"{layer}/agents"
+        if not os.path.isdir(root):
+            continue
+        direct = f"{root}/{agent_type}.toml"
+        if find_first_readable(direct):
+            text = slurp(direct)
+            if parse_toml_name(text) in (None, agent_type):
+                return direct, text
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames.sort()
+            for fn in sorted(filenames):
+                if not fn.endswith(".toml"):
+                    continue
+                path = os.path.join(dirpath, fn)
+                if path == direct:
+                    continue
+                text = slurp(path)
+                if parse_toml_name(text) == agent_type:
+                    return path, text
+    return None, ""
+
+
 def resolve_skill_codex(name, cwd, home):
     """Resolve a skill name against the locations Codex itself searches."""
+    codex_home = codex_home_dir(home)
     # explicit plugin namespace: plugin:skill — Codex uses the same syntax
     # as Claude Code, but installs plugins under a versioned cache path.
     if ":" in name and not name.startswith(":"):
         plugin, _, skill = name.partition(":")
         if plugin and skill and " " not in plugin:
             for pat in (
-                f"{home}/.codex/plugins/cache/*/{plugin}/*/skills/{skill}/SKILL.md",
-                f"{home}/.codex/plugins/cache/{plugin}/*/skills/{skill}/SKILL.md",
-                f"{home}/.codex/plugins/cache/*/{plugin}/skills/{skill}/SKILL.md",
+                f"{codex_home}/plugins/cache/*/{plugin}/*/skills/{skill}/SKILL.md",
+                f"{codex_home}/plugins/cache/{plugin}/*/skills/{skill}/SKILL.md",
+                f"{codex_home}/plugins/cache/*/{plugin}/skills/{skill}/SKILL.md",
             ):
                 for g in sorted(glob.glob(pat)):
                     if os.access(g, os.R_OK):
                         return g
             return None
 
-    for base in (
-        f"{cwd}/.agents/skills",
-        f"{cwd}/../.agents/skills",
+    bases = []
+    for d in project_dirs(cwd):
+        bases += [f"{d}/.codex/skills", f"{d}/.agents/skills"]
+    bases += [
+        f"{codex_home}/skills",
         f"{home}/.agents/skills",
-        f"{home}/.codex/skills",
+        f"{codex_home}/skills/.system",
         "/etc/codex/skills",
-    ):
+    ]
+    for base in bases:
         p = f"{base}/{name}/SKILL.md"
         if os.access(p, os.R_OK):
             return p
@@ -286,14 +429,10 @@ def main_codex(data):
     cwd = data.get("cwd") or os.environ.get("PWD") or "."
     home = os.environ.get("HOME") or ""
 
-    agent_file = find_first_readable(
-        f"{cwd}/.codex/agents/{agent_type}.toml",
-        f"{home}/.codex/agents/{agent_type}.toml",
-    )
+    agent_file, text = find_codex_agent(agent_type, cwd, home)
     if not agent_file:
         return 0
 
-    text = slurp(agent_file)
     legacy = parse_skills_toml(text)
     skills = parse_skills_comment(text) or legacy
     if not skills:
@@ -344,10 +483,15 @@ def main_codex(data):
         "their SKILL.md files; their content is already here.\n\n"
     )
 
+    briefing = header + "\n\n---\n\n".join(blocks)
+    note = size_note(agent_type, briefing)
+    if note:
+        notes.append(note)
+
     out = {
         "hookSpecificOutput": {
             "hookEventName": "SubagentStart",
-            "additionalContext": header + "\n\n---\n\n".join(blocks),
+            "additionalContext": briefing,
         }
     }
     if notes:
@@ -435,12 +579,17 @@ def main():
         + original
     )
 
-    sys.stdout.write(json.dumps({
+    out = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "updatedInput": ti,
         }
-    }))
+    }
+    note = size_note(subagent, "".join(blocks))
+    if note:
+        sys.stderr.write(note + "\n")
+        out["systemMessage"] = note
+    sys.stdout.write(json.dumps(out))
     return 0
 
 

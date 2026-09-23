@@ -51,7 +51,7 @@ found, nothing proceeds on a partial briefing.
 | | Claude Code | Codex |
 |---|---|---|
 | Hook event | `PreToolUse` on the `Agent` tool | `SubagentStart` |
-| Agent definition | `.claude/agents/<name>.md` | `.codex/agents/<name>.toml` |
+| Agent definition | `.claude/agents/<name>.md` | `.codex/agents/*.toml` |
 | Declaration | `briefing.skills` in frontmatter | `# briefing: skills = [...]` comment |
 | Injection | rewrites the agent's prompt | `additionalContext` |
 | Missing skill | spawn is **denied** | agent starts, told to abort |
@@ -115,7 +115,13 @@ Skill names resolve the same way in both worlds:
 - **namespaced** (`superpowers:brainstorming`) — straight to that plugin's skills.
 
 Only the roots differ, and each side searches exactly where its own harness
-looks: `.claude/skills/` for Claude Code, `.agents/skills/` for Codex.
+looks: `.claude/skills/` for Claude Code; `.codex/skills/` and `.agents/skills/`
+up to the repo root, then `$CODEX_HOME/skills/` and `~/.agents/skills/` for
+Codex. Codex agents are found the way Codex finds them — by their `name` field,
+in any `*.toml` under `agents/`, or through `[agents.<name>] config_file`.
+
+A briefing above 64 kB of skill text still goes through, but the hook says so in
+a `systemMessage`: that much context is rarely what anyone meant.
 
 ## Install
 

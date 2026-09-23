@@ -15,7 +15,7 @@ write the declaration:
 
 | | Claude Code | Codex |
 |---|---|---|
-| Agent file | `.claude/agents/<name>.md` | `.codex/agents/<name>.toml` |
+| Agent file | `.claude/agents/<name>.md` | `.codex/agents/*.toml` |
 | Declaration | `briefing:` frontmatter block | `# briefing:` comment |
 | Missing skill | spawn is denied | agent starts, told to abort |
 
@@ -54,9 +54,12 @@ means "this skill is visible to the agent", which is not the same as
 "preloaded" — `briefing` deliberately leaves it alone so you can say
 one without the other.
 
-Note that Codex agent names take underscores, not hyphens. Codex
-itself takes the role name from `name`, but the hook finds the file
-by that name — keep the file called `<name>.toml`.
+Note that Codex agent names take underscores, not hyphens. The role
+name is the `name` field, not the file name; the hook finds the file
+the way Codex does — any `*.toml` under `.codex/agents/` (in any
+project directory up to the repo root, or `$CODEX_HOME/agents/`),
+including subdirectories, or a role declared in `config.toml` as
+`[agents.<name>] config_file = "..."`.
 
 ## The frontmatter — Claude Code
 
@@ -92,8 +95,10 @@ Skill names can be:
 
 The names are identical in both worlds; only the roots differ. Claude
 Code searches `.claude/skills/` and `~/.claude/skills/`; Codex
-searches `.agents/skills/` (project, parent, repo root), then
-`~/.agents/skills/`, `~/.codex/skills/`, and `/etc/codex/skills/`.
+searches `.codex/skills/` and `.agents/skills/` in every directory
+from the working directory up to the repo root, then
+`$CODEX_HOME/skills/`, `~/.agents/skills/`, the bundled
+`$CODEX_HOME/skills/.system/`, and `/etc/codex/skills/`.
 Each side looks exactly where its own harness looks, which is why a
 bare name stays portable between them.
 
@@ -205,8 +210,9 @@ first. Non-interactive runs (`codex exec`) cannot grant trust at all,
 so they never brief anything unless started with
 `--dangerously-bypass-hook-trust`.
 
-Also confirm the agent file is where Codex looks — `.codex/agents/`,
-with underscores in the name — and remember that the skill list every
+Also confirm the agent file is where Codex looks — under
+`.codex/agents/` or `$CODEX_HOME/agents/`, with a `name` that matches
+the spawned agent type — and remember that the skill list every
 agent sees carries only names and descriptions. An agent quoting a
 skill's content is not proof the briefing worked; it may simply have
 read the file. To test properly, compare against the same agent with

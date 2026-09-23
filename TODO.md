@@ -24,10 +24,10 @@ Live worklist. Tick as we go.
 - [x] Example agent in `examples/agents/briefing-demo.md` + matching
       skill in `examples/skills/briefing-demo-skill/` for end-to-end
       verification in any project.
-- [ ] Token-budget guard: if injected size exceeds N kB, log a
-      warning to stderr (still spawn). Decide N — start at 64 kB.
-- [ ] Cycle detection: if a skill's body itself contains a frontmatter
-      `skills:` list, **do not** recursively expand. Document it.
+- [x] Token-budget guard: above 64 kB of skill text, warn on stderr and
+      in a `systemMessage` (still spawn).
+- [x] No recursive expansion: a skill's own `briefing.skills` is never
+      followed — documented in the skill, pinned by a test.
 
 ## v0.3 — Distribution
 
@@ -72,8 +72,9 @@ Live worklist. Tick as we go.
 - [x] Move the Codex declaration into a `# briefing: skills = [...]`
       comment — Codex 0.153 rejects agent files with a `[briefing]` table
       (karr #1). Legacy table still read, with a migration warning.
-- [ ] Find Codex agent files by their `name` field, not only by file name,
-      and honour `CODEX_HOME` instead of assuming `~/.codex`.
+- [x] Find Codex agent files the way Codex does — `name` field, recursive
+      `agents/`, project layers up to the root, `[agents.<name>]
+      config_file` — and honour `CODEX_HOME` (karr #2).
 - [ ] Decide whether the hard-fail should also fire a `SessionStart`
       pre-flight under Codex, so unresolvable agents surface before
       any spawn burns tokens.

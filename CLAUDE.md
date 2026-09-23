@@ -28,7 +28,7 @@ declaration and emitting the result is shared.
 | | Claude Code | Codex |
 |---|---|---|
 | Event | `PreToolUse`, matcher `Agent` | `SubagentStart` |
-| Agent file | `<cwd>/.claude/agents/<subagent_type>.md` | `<cwd>/.codex/agents/<agent_type>.toml` |
+| Agent file | `<cwd>/.claude/agents/<subagent_type>.md` | any `*.toml` under a layer's `agents/` whose `name` matches, or `[agents.<name>] config_file` |
 | Declaration | `briefing.skills` in YAML frontmatter | `# briefing: skills = [...]` TOML comment |
 | Output | `updatedInput` with a rewritten `prompt` | `additionalContext` |
 | Missing skill | `permissionDecision: deny` | abort instruction + `systemMessage` |
@@ -130,13 +130,27 @@ and it is why bare names stay portable.
 **Claude Code**: `<cwd>/.claude/skills` → `~/.claude/skills` →
 `~/.claude/plugins/cache/*/skills` → `~/.claude/plugins/cache/*/*/skills`.
 
-**Codex**: `<cwd>/.agents/skills` → `<cwd>/../.agents/skills` →
-`~/.agents/skills` → `~/.codex/skills` → `/etc/codex/skills`.
+**Codex**: for each directory from `<cwd>` up to the project root (nearest
+`.git`, Codex's default `project_root_markers`), nearest first: `.codex/skills`
+→ `.agents/skills`; then `$CODEX_HOME/skills` → `~/.agents/skills` →
+`$CODEX_HOME/skills/.system` → `/etc/codex/skills`. `CODEX_HOME` defaults to
+`~/.codex` and also locates the plugin cache.
+
+## Agent lookup on Codex
+
+Codex does not find agents by file name. Each config layer — every `.codex/`
+from the project root down to `<cwd>`, then `$CODEX_HOME`, then `/etc/codex` —
+contributes roles declared in its `config.toml` (`[agents.<name>] config_file`,
+relative to that file) and every `*.toml` below its `agents/`, recursively,
+named by their `name` field. `find_codex_agent` walks the same layers, nearest
+first, and within a layer prefers the declared role, as Codex does.
+`<name>.toml` is only a fast path, and is skipped if its `name` says otherwise.
+Sources: `codex-rs/agent-roles/src/{loader,discovery}.rs`.
 
 `plugin:skill` works in both. Codex uses the same syntax — observed as
 `briefing:briefing` in `codex debug prompt-input`, though its documentation does
 not mention namespacing — and installs plugins under
-`~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/`.
+`$CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/`.
 
 **Codex's `[[skills.config]]` is not ours.** It means "visible to this agent",
 not "preloaded". Reading it as a briefing declaration would remove the user's

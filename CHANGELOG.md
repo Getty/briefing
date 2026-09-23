@@ -21,7 +21,24 @@ longer tolerates the table.
 - A leftover `[briefing]` table is still honoured where an older Codex spawns
   the agent at all, and the hook adds a `systemMessage` asking for the move to
   the comment form. If both are present, the comment wins.
-- 7 new unit tests; suite green on Python 3.8, 3.10 and 3.13. Verified end to
+- Codex agents are found the way Codex finds them. The role name is the
+  `name` field, not the file name; every `*.toml` below `agents/` counts,
+  recursively; each directory from the project root down to cwd is a layer,
+  nearest first; roles declared as `[agents.<name>] config_file` in a layer's
+  `config.toml` win within that layer. Previously only
+  `<cwd>/.codex/agents/<name>.toml` and `~/.codex/agents/<name>.toml` were
+  tried, and anything else went unbriefed without a word.
+- `CODEX_HOME` is honoured for agents, skills and the plugin cache.
+- Codex skill roots now match Codex: `.codex/skills` and `.agents/skills` in
+  every directory up to the project root, `$CODEX_HOME/skills`,
+  `~/.agents/skills`, the bundled `$CODEX_HOME/skills/.system`, and
+  `/etc/codex/skills`. The unconditional `<cwd>/../.agents/skills` is gone —
+  Codex stops at the project root.
+- A briefing over 64 kB of skill text still spawns, in both harnesses, but
+  carries a `systemMessage` saying how large it is.
+- Skills stay leaves: a skill's own `briefing.skills` is never followed, now
+  pinned by a test.
+- 24 new unit tests; suite green on Python 3.8, 3.10 and 3.13. Verified end to
   end against Codex 0.153.4: the declaring agent answered with a passphrase that
   existed only in the skill body, without a single tool call; the identical
   agent without the comment answered `UNKNOWN`; a marker in the installed hook

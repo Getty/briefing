@@ -321,6 +321,64 @@ class BriefingHookTests(unittest.TestCase):
         self.assertIn("VISIBLE BODY", prompt)
         self.assertNotIn("secret-metadata", prompt)
 
+    # --- limits ----------------------------------------------------------
+
+    def test_large_briefing_still_spawns_but_warns(self):
+        write(self.cwd / ".claude/agents/demo.md", """
+            ---
+            briefing:
+              skills:
+                - big
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/big/SKILL.md", "x" * (70 * 1024))
+        proc = run_hook(self._payload(), fake_home=self.home)
+        out = json.loads(proc.stdout)
+        self.assertIn("updatedInput", out["hookSpecificOutput"])
+        self.assertIn("kB", out["systemMessage"])
+        self.assertIn("kB", proc.stderr)
+
+    def test_small_briefing_has_no_size_warning(self):
+        write(self.cwd / ".claude/agents/demo.md", """
+            ---
+            briefing:
+              skills:
+                - foo
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO")
+        out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
+        self.assertNotIn("systemMessage", out)
+
+    def test_skills_are_leaves_not_expanded_recursively(self):
+        # A skill that itself declares briefing.skills is injected as it is;
+        # its own list is not followed, so there is nothing to cycle on.
+        write(self.cwd / ".claude/agents/demo.md", """
+            ---
+            briefing:
+              skills:
+                - outer
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/outer/SKILL.md", """
+            ---
+            name: outer
+            briefing:
+              skills:
+                - outer
+                - inner
+            ---
+            OUTER BODY
+        """)
+        write(self.cwd / ".claude/skills/inner/SKILL.md", "INNER BODY")
+        out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
+        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        self.assertEqual(prompt.count("OUTER BODY"), 1)
+        self.assertNotIn("INNER BODY", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,8 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "briefing-preload"
 
 
-def run_hook(payload, *, fake_home):
-    env = {**os.environ, "HOME": str(fake_home)}
+def run_hook(payload, *, fake_home, extra_env=None):
+    env = {k: v for k, v in os.environ.items() if k != "CODEX_HOME"}
+    env["HOME"] = str(fake_home)
+    env.update(extra_env or {})
     proc = subprocess.run(
         ["python3", str(HOOK)],
         input=json.dumps(payload),
@@ -283,6 +285,222 @@ class CodexHookTests(unittest.TestCase):
         out = self._out(run_hook(self._payload(), fake_home=self.home))
 
         self.assertNotIn("systemMessage", out)
+
+    def test_large_briefing_warns_in_system_message(self):
+        self._agent("""
+            name = "demo"
+            # briefing: skills = ["big"]
+        """)
+        self._skill("big", "x" * (70 * 1024))
+
+        out = self._out(run_hook(self._payload(), fake_home=self.home))
+
+        self.assertIn("additionalContext", out["hookSpecificOutput"])
+        self.assertIn("kB", out["systemMessage"])
+
+    # --- finding the agent file the way Codex does -------------------------
+
+    def test_agent_found_by_name_field_not_file_name(self):
+        # Codex takes the role name from `name`; the file name is free.
+        write(self.cwd / ".codex/agents/whatever.toml", """
+            name = "demo"
+            # briefing: skills = ["by-name"]
+        """)
+        self._skill("by-name", "BY NAME\n")
+
+        ctx = self._out(run_hook(self._payload(), fake_home=self.home))["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("BY NAME", ctx)
+
+    def test_agent_found_in_subdirectory(self):
+        # Codex discovers every *.toml under agents/, recursively.
+        write(self.cwd / ".codex/agents/team/demo.toml", """
+            name = "demo"
+            # briefing: skills = ["nested"]
+        """)
+        self._skill("nested", "NESTED\n")
+
+        ctx = self._out(run_hook(self._payload(), fake_home=self.home))["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("NESTED", ctx)
+
+    def test_file_named_after_agent_but_declaring_another_name_is_not_it(self):
+        write(self.cwd / ".codex/agents/demo.toml", """
+            name = "someone_else"
+            # briefing: skills = ["wrong"]
+        """)
+        self._skill("wrong", "WRONG AGENT\n")
+
+        proc = run_hook(self._payload(), fake_home=self.home)
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout, "")
+
+    def test_agent_found_in_repo_root_from_subdirectory(self):
+        # Every directory from the project root down to cwd is a config layer.
+        (self.cwd / ".git").mkdir()
+        sub = self.cwd / "pkg" / "deep"
+        sub.mkdir(parents=True)
+        self._agent("""
+            name = "demo"
+            # briefing: skills = ["rooted"]
+        """)
+        self._skill("rooted", "ROOTED\n")
+
+        ctx = self._out(run_hook(self._payload(cwd=str(sub)), fake_home=self.home))["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("ROOTED", ctx)
+
+    def test_nearest_project_layer_wins(self):
+        (self.cwd / ".git").mkdir()
+        sub = self.cwd / "pkg"
+        write(self.cwd / ".codex/agents/demo.toml", """
+            name = "demo"
+            # briefing: skills = ["outer"]
+        """)
+        write(sub / ".codex/agents/demo.toml", """
+            name = "demo"
+            # briefing: skills = ["inner"]
+        """)
+        self._skill("outer", "OUTER\n")
+        self._skill("inner", "INNER\n")
+
+        ctx = self._out(run_hook(self._payload(cwd=str(sub)), fake_home=self.home))["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("INNER", ctx)
+        self.assertNotIn("OUTER", ctx)
+
+    def test_nothing_above_the_project_root_is_read(self):
+        (self.cwd / ".git").mkdir()
+        write(self.root / ".codex/agents/demo.toml", """
+            name = "demo"
+            # briefing: skills = ["outside"]
+        """)
+        self._skill("outside", "OUTSIDE\n")
+
+        proc = run_hook(self._payload(), fake_home=self.home)
+        self.assertEqual(proc.stdout, "")
+
+    def test_agent_declared_in_config_toml_with_config_file(self):
+        # `[agents.<name>] config_file` points anywhere; relative paths are
+        # relative to the config.toml, and the file need not carry `name`.
+        write(self.cwd / ".codex/config.toml", """
+            [agents.demo]
+            description = "declared"
+            config_file = "roles/demo-role.toml"
+        """)
+        write(self.cwd / ".codex/roles/demo-role.toml", """
+            # briefing: skills = ["declared-skill"]
+            developer_instructions = "x"
+        """)
+        self._skill("declared-skill", "DECLARED\n")
+
+        ctx = self._out(run_hook(self._payload(), fake_home=self.home))["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("DECLARED", ctx)
+
+    def test_declared_role_wins_over_discovered_file_in_same_layer(self):
+        write(self.cwd / ".codex/config.toml", """
+            [agents.demo]
+            config_file = "roles/demo.toml"
+        """)
+        write(self.cwd / ".codex/roles/demo.toml", """
+            # briefing: skills = ["declared"]
+        """)
+        self._agent("""
+            name = "demo"
+            # briefing: skills = ["discovered"]
+        """)
+        self._skill("declared", "DECLARED WINS\n")
+        self._skill("discovered", "DISCOVERED\n")
+
+        ctx = self._out(run_hook(self._payload(), fake_home=self.home))["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("DECLARED WINS", ctx)
+        self.assertNotIn("DISCOVERED", ctx)
+
+    def test_declared_role_is_found_without_tomllib(self):
+        shim = self.root / "notoml"
+        write(shim / "tomllib.py", "raise ImportError('blocked for test')\n")
+        write(self.cwd / ".codex/config.toml", """
+            model = "x"
+
+            [agents.other]
+            config_file = "roles/other.toml"
+
+            [agents.demo]
+            description = "d"
+            config_file = 'roles/demo.toml'
+        """)
+        write(self.cwd / ".codex/roles/demo.toml", """
+            # briefing: skills = ["fallback-declared"]
+        """)
+        self._skill("fallback-declared", "FALLBACK DECLARED\n")
+
+        out = self._out(run_hook(
+            self._payload(), fake_home=self.home, extra_env={"PYTHONPATH": str(shim)},
+        ))
+
+        self.assertIn("FALLBACK DECLARED", out["hookSpecificOutput"]["additionalContext"])
+
+    # --- CODEX_HOME ---------------------------------------------------------
+
+    def test_codex_home_is_honoured_for_agents_skills_and_plugins(self):
+        ch = self.root / "codexhome"
+        write(ch / "agents/demo.toml", """
+            name = "demo"
+            # briefing: skills = ["home-skill", "someplugin:tool"]
+        """)
+        self._skill("home-skill", "CODEX HOME SKILL\n", root=ch / "skills")
+        write(
+            ch / "plugins/cache/mp/someplugin/1.0.0/skills/tool/SKILL.md",
+            "---\nname: tool\ndescription: d\n---\n\nCODEX HOME PLUGIN\n",
+        )
+
+        out = self._out(run_hook(
+            self._payload(), fake_home=self.home, extra_env={"CODEX_HOME": str(ch)},
+        ))
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("CODEX HOME SKILL", ctx)
+        self.assertIn("CODEX HOME PLUGIN", ctx)
+
+    # --- skill roots Codex searches ----------------------------------------
+
+    def test_skill_resolves_from_project_codex_skills(self):
+        self._agent("""
+            name = "demo"
+            # briefing: skills = ["layer-skill"]
+        """)
+        self._skill("layer-skill", "LAYER SKILL\n", root=self.cwd / ".codex/skills")
+
+        ctx = self._out(run_hook(self._payload(), fake_home=self.home))["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("LAYER SKILL", ctx)
+
+    def test_skill_resolves_from_repo_root_agents_skills(self):
+        (self.cwd / ".git").mkdir()
+        sub = self.cwd / "a" / "b"
+        sub.mkdir(parents=True)
+        self._agent("""
+            name = "demo"
+            # briefing: skills = ["repo-skill"]
+        """)
+        self._skill("repo-skill", "REPO ROOT SKILL\n")
+
+        ctx = self._out(run_hook(self._payload(cwd=str(sub)), fake_home=self.home))["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("REPO ROOT SKILL", ctx)
+
+    def test_skill_resolves_from_system_skill_cache(self):
+        self._agent("""
+            name = "demo"
+            # briefing: skills = ["bundled"]
+        """)
+        self._skill("bundled", "BUNDLED\n", root=self.home / ".codex/skills/.system")
+
+        ctx = self._out(run_hook(self._payload(), fake_home=self.home))["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("BUNDLED", ctx)
 
     # --- the tomllib-less interpreter (CI still runs Python 3.10) ---------
 
