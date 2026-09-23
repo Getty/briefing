@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-23T18:01:12Z
+claimed_by: briefing
+class: standard
+completed: 2026-09-23T18:01:12Z
+created: 2026-09-23T03:30:28Z
+id: 2
+priority: medium
+started: 2026-09-23T18:01:12Z
+status: done
+tags:
+- codex
+- bug
+title: Find Codex agent files by name field and honour CODEX_HOME
+updated: 2026-09-23T18:01:12Z
+---
+
+Found while fixing #1. Codex takes the role name from the TOML `name` field and discovers every *.toml recursively under .codex/agents and $CODEX_HOME/agents (codex-rs/agent-roles/src/discovery.rs). The hook only tries <cwd>/.codex/agents/<agent_type>.toml and ~/.codex/agents/<agent_type>.toml, so an agent whose file name differs from its name, lives in a subdirectory, or sits under a non-default CODEX_HOME is silently not briefed. Fix: direct path first, then scan and match `name`; use $CODEX_HOME when set (also for the plugin cache and ~/.codex/skills).
