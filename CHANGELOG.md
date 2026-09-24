@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — 2026-09-24
+
+- Each `<skill>` element carries the skill's absolute directory:
+  `<skill name="foo" dir="/abs/path/skills/foo">`. Only `SKILL.md` is inlined,
+  so a relative `references/api.md` had nothing to resolve against — under
+  Claude Code a briefed agent searched the whole filesystem for it. The header
+  now tells the agent to read references from `dir` when it needs them; they
+  are still not inlined. Codex already lists every skill's path, so there it
+  matters only for skills hidden from that agent.
+
+
 ## 0.4.1 — 2026-09-24
 
 - The `SessionStart` pre-flight reports only what would fail at spawn time.

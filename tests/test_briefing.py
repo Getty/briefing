@@ -135,9 +135,9 @@ class BriefingHookTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         out = json.loads(proc.stdout)
         prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
-        self.assertIn('<skill name="foo">', prompt)
-        self.assertIn('<skill name="bar">', prompt)
-        self.assertIn('<skill name="baz">', prompt)
+        self.assertIn('<skill name="foo"', prompt)
+        self.assertIn('<skill name="bar"', prompt)
+        self.assertIn('<skill name="baz"', prompt)
         self.assertTrue(prompt.endswith("ORIGINAL"))
 
     def test_flow_list_parses(self):
@@ -154,9 +154,9 @@ class BriefingHookTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         out = json.loads(proc.stdout)
         prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
-        self.assertIn('<skill name="foo">', prompt)
-        self.assertIn('<skill name="bar">', prompt)
-        self.assertIn('<skill name="baz">', prompt)
+        self.assertIn('<skill name="foo"', prompt)
+        self.assertIn('<skill name="bar"', prompt)
+        self.assertIn('<skill name="baz"', prompt)
 
     def test_briefing_block_coexists_with_other_frontmatter(self):
         write(self.cwd / ".claude/agents/demo.md", """
@@ -254,7 +254,7 @@ class BriefingHookTests(unittest.TestCase):
         proc = run_hook(self._payload(), fake_home=self.home)
         out = json.loads(proc.stdout)
         prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
-        self.assertIn('<skill name="superpowers:brainstorming">', prompt)
+        self.assertIn('<skill name="superpowers:brainstorming"', prompt)
         self.assertIn("BRAIN BODY", prompt)
 
     def test_namespaced_skill_nested_owner(self):
@@ -412,9 +412,27 @@ class BriefingHookTests(unittest.TestCase):
         write(self.cwd / ".claude/skills/foo/SKILL.md", "---\nname: foo\n---\nFOO BODY\n")
         out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
         prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
-        self.assertRegex(prompt, r'<skill name="foo">\s*FOO BODY\s*</skill>')
+        self.assertRegex(prompt, r'<skill name="foo"[^>]*>\s*FOO BODY\s*</skill>')
         self.assertNotIn("## Skill:", prompt)
         self.assertTrue(prompt.rstrip().endswith("ORIGINAL"))
+
+    def test_skill_element_carries_its_directory_for_references(self):
+        write(self.cwd / ".claude/agents/demo.md", """
+            ---
+            briefing:
+              skills:
+                - foo
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "See references/api.md.\n")
+        write(self.cwd / ".claude/skills/foo/references/api.md", "API\n")
+        out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
+        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        skill_dir = os.path.abspath(self.cwd / ".claude/skills/foo")
+        self.assertIn('<skill name="foo" dir="%s">' % skill_dir, prompt)
+        self.assertIn("relative to", prompt)
+        self.assertNotIn("\nAPI\n", prompt)
 
     # --- finding the agent the way Claude Code does ----------------------
 

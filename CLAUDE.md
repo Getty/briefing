@@ -128,7 +128,10 @@ stdout: `hookSpecificOutput.additionalContext`, optionally alongside a top-level
 
 Both spawn paths put a one-line audit into `systemMessage` on success
 (`briefing: agent ← a, b (N kB)`), plus any warnings on further lines. Skills
-are injected as `<skill name="...">` elements, frontmatter stripped.
+are injected as `<skill name="..." dir="...">` elements, frontmatter stripped.
+`dir` is the skill's absolute directory: only `SKILL.md` is inlined, so without
+it the agent could not resolve the relative `references/…` paths a skill points
+to. Inlining those as well would defeat progressive disclosure and the budget.
 
 **SessionStart — stdin (both harnesses):**
 

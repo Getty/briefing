@@ -310,11 +310,27 @@ class CodexHookTests(unittest.TestCase):
         out = self._out(run_hook(self._payload(), fake_home=self.home))
         ctx = out["hookSpecificOutput"]["additionalContext"]
 
-        self.assertRegex(ctx, r'<skill name="one">\s*ONE\s*</skill>')
-        self.assertIn('<skill name="two">', ctx)
+        self.assertRegex(ctx, r'<skill name="one"[^>]*>\s*ONE\s*</skill>')
+        self.assertIn('<skill name="two"', ctx)
         self.assertEqual(len(out["systemMessage"].splitlines()), 1)
         self.assertIn("demo", out["systemMessage"])
         self.assertIn("one, two", out["systemMessage"])
+
+    def test_skill_element_carries_its_directory_for_references(self):
+        self._agent("""
+            name = "demo"
+            # briefing: skills = ["one"]
+        """)
+        self._skill("one", "See references/api.md.\n")
+        write(self.cwd / ".agents/skills/one/references/api.md", "API\n")
+
+        out = self._out(run_hook(self._payload(), fake_home=self.home))
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+
+        skill_dir = os.path.abspath(self.cwd / ".agents/skills/one")
+        self.assertIn('<skill name="one" dir="%s">' % skill_dir, ctx)
+        self.assertIn("relative to", ctx)
+        self.assertNotIn("\nAPI\n", ctx)
 
     # --- finding the agent file the way Codex does -------------------------
 

@@ -65,10 +65,13 @@ Each skill arrives wrapped in its own element, so the agent can tell where one
 ends and the next begins:
 
 ```
-<skill name="getty-perl-core">
+<skill name="getty-perl-core" dir="/home/you/.claude/skills/getty-perl-core">
 …the SKILL.md body, frontmatter stripped…
 </skill>
 ```
+
+Only `SKILL.md` is injected. A skill's `references/` and `scripts/` stay on disk
+and load on demand, as they do natively — `dir` tells the agent where they are.
 
 Every successful briefing leaves one line for you, not for the model:
 `briefing: my-agent ← getty-perl-core, superpowers:brainstorming (14 kB)`. Above

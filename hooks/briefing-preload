@@ -528,7 +528,10 @@ class Briefing:
                 self.missing.append(name)
                 continue
             _, body = split_frontmatter(slurp(skill_path))
-            blocks.append(f'<skill name="{name}">\n{body.strip()}\n</skill>')
+            skill_dir = os.path.dirname(os.path.abspath(skill_path))
+            blocks.append(
+                f'<skill name="{name}" dir="{skill_dir}">\n{body.strip()}\n</skill>'
+            )
         self.text = "\n\n".join(blocks)
         self.size = len(self.text.encode("utf-8"))
 
@@ -575,7 +578,9 @@ BRIEFING_HEADER = (
     "# Briefing — pre-loaded skills\n\n"
     "The skills below have been injected directly into your context by the\n"
     "briefing plugin, one <skill> element each. Treat them as already loaded —\n"
-    "{dont}; their content is already here.\n\n"
+    "{dont}; their content is already here. Only the SKILL.md body is\n"
+    "included: paths a skill mentions (references/, scripts/, …) are relative to\n"
+    "its element's dir, so read them from there when you need them.\n\n"
 )
 
 
