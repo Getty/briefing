@@ -186,6 +186,17 @@ class PreflightTests(Sandbox):
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout, "")
 
+    def test_oversized_briefing_is_not_a_session_start_warning(self):
+        # Too big still works: that is for the doctor and the spawn-time
+        # audit line, not for a warning at every session start.
+        self.claude_agent("reviewer", ["big"])
+        self.claude_skill("big", "x" * (70 * 1024))
+
+        proc = self.session_start()
+
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout, "")
+
     def test_project_without_agents_is_silent(self):
         proc = self.session_start()
         self.assertEqual(proc.stdout, "")

@@ -737,10 +737,13 @@ def main_session_start(data):
     cwd = data.get("cwd") or os.environ.get("PWD") or "."
     home = os.environ.get("HOME") or ""
 
+    # Only what would fail at spawn time. An oversized briefing still works;
+    # it shows in the doctor and in the spawn's own audit line, and repeating
+    # it at every session start would be noise.
     lines = []
     for harness, b in check(cwd, home, harness_of(data)):
-        fails, warns = problems(b)
-        for p in fails + warns:
+        fails, _ = problems(b)
+        for p in fails:
             lines.append(f"  {HARNESS_LABEL[harness]} agent '{b.agent}': {p}")
     if not lines:
         return 0

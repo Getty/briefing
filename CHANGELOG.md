@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 — 2026-09-24
+
+- The `SessionStart` pre-flight reports only what would fail at spawn time.
+  0.4.0 also listed oversized briefings under "declared skills that will not
+  work" — they do work, so every session start in such a project carried a
+  false alarm. Size stays a `WARN` in `briefing-doctor` and a line in the
+  spawn's own audit message.
+
+
 ## 0.4.0 — 2026-09-24
 
 Broken declarations surface before anything spawns, and every briefing
