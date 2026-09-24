@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-# briefing — PreToolUse hook for the Agent tool.
+# briefing — pre-loads the skills a subagent declares into its context.
 #
-# Reads the target subagent's frontmatter, resolves the `skills:` list,
-# and rewrites tool_input.prompt to inline the full SKILL.md body of each
-# declared skill before the agent's original prompt.
+# One script, three entry points:
 #
-# Hard-fail policy: if any declared skill cannot be resolved, the Agent
-# spawn is denied with a clear error message.
+#   PreToolUse on the Agent tool (Claude Code)  rewrite the prompt, or deny
+#   SubagentStart (Codex)                        additionalContext, or abort
+#   SessionStart (both)                          warn about broken declarations
+#
+# Run as `briefing-doctor` (or `briefing-preload doctor`) it checks every
+# briefing-aware agent of a project and exits 1 if a spawn would fail.
+#
+# Hard-fail policy: if any declared skill cannot be resolved, nothing
+# proceeds on a partial briefing.
 
 import glob
 import json
@@ -18,17 +23,6 @@ import sys
 # Above this many bytes of injected skill text the spawn still goes ahead,
 # but the human hears about it: that much context is rarely intended.
 BUDGET_BYTES = 64 * 1024
-
-
-def size_note(agent, briefing):
-    size = len(briefing.encode("utf-8"))
-    if size <= BUDGET_BYTES:
-        return None
-    return (
-        f"briefing: agent '{agent}' is briefed with {size // 1024} kB of skill "
-        f"text (over {BUDGET_BYTES // 1024} kB) — consider declaring fewer or "
-        "smaller skills."
-    )
 
 
 def slurp(path):
@@ -120,6 +114,61 @@ def parse_skills_list(fm):
         ]
 
     return []
+
+
+_FM_NAME_RE = re.compile(r"""^name:[ \t]*(["']?)([^"'\r\n]+?)\1[ \t]*$""", re.MULTILINE)
+
+
+def parse_fm_name(fm):
+    m = _FM_NAME_RE.search(fm or "")
+    return m.group(2).strip() if m else None
+
+
+def _walk_files(root, suffix):
+    """Every file below `root` ending in `suffix`, in a stable order."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for fn in sorted(filenames):
+            if fn.endswith(suffix):
+                yield os.path.join(dirpath, fn)
+
+
+def claude_agent_roots(cwd, home):
+    return [f"{cwd}/.claude/agents", f"{home}/.claude/agents"]
+
+
+def claude_agent_name(path):
+    fm, _ = split_frontmatter(slurp(path))
+    return parse_fm_name(fm) or os.path.splitext(os.path.basename(path))[0]
+
+
+def find_claude_agent(subagent, cwd, home):
+    """Find the agent file Claude Code spawns as `subagent`.
+
+    The agent's identity is its frontmatter `name`; the file name is only
+    the fast path, and a file named after the agent that declares another
+    name is not it.
+    """
+    for root in claude_agent_roots(cwd, home):
+        if not os.path.isdir(root):
+            continue
+        direct = f"{root}/{subagent}.md"
+        if find_first_readable(direct) and claude_agent_name(direct) == subagent:
+            return direct
+        for path in _walk_files(root, ".md"):
+            if path != direct and claude_agent_name(path) == subagent:
+                return path
+    return None
+
+
+def list_claude_agents(cwd, home):
+    """{name: path} for every Claude Code agent; project beats user."""
+    agents = {}
+    for root in claude_agent_roots(cwd, home):
+        if os.path.isdir(root):
+            for path in _walk_files(root, ".md"):
+                agents.setdefault(claude_agent_name(path), path)
+    return agents
 
 
 def resolve_skill(name, cwd, home):
@@ -304,47 +353,57 @@ def project_dirs(cwd):
         d = parent
 
 
-def declared_role_file(layer, agent_type):
-    """Return the `config_file` that `<layer>/config.toml` declares for a role.
+def codex_layers(cwd, home):
+    """Config folders Codex layers, highest priority first."""
+    return [f"{d}/.codex" for d in project_dirs(cwd)] + [codex_home_dir(home), "/etc/codex"]
+
+
+_TOML_AGENT_SECTION_RE = re.compile(
+    r"""^\[agents\.(?:"([^"\]]+)"|([A-Za-z0-9_-]+))\][ \t]*\r?\n(.*?)(?=^\[|\Z)""",
+    re.MULTILINE | re.DOTALL,
+)
+_TOML_CONFIG_FILE_RE = re.compile(
+    r"""^config_file[ \t]*=[ \t]*(?:"([^"]*)"|'([^']*)')""", re.MULTILINE
+)
+
+
+def declared_roles(layer):
+    """{name: path} for roles `<layer>/config.toml` declares with a config_file.
 
     Codex lets `[agents.<name>] config_file = "..."` point at a role file
     anywhere; relative paths resolve against the config.toml's directory.
     """
     text = slurp(f"{layer}/config.toml")
     if not text:
-        return None
+        return {}
 
     try:
         import tomllib
     except ImportError:
         tomllib = None
 
-    config_file = None
+    found = {}
     if tomllib is not None:
         try:
-            role = tomllib.loads(text).get("agents", {}).get(agent_type)
+            agents = tomllib.loads(text).get("agents", {})
         except Exception:
-            return None
-        if isinstance(role, dict) and isinstance(role.get("config_file"), str):
-            config_file = role["config_file"]
+            return {}
+        if isinstance(agents, dict):
+            for name, role in agents.items():
+                if isinstance(role, dict) and isinstance(role.get("config_file"), str):
+                    found[name] = role["config_file"]
     else:
-        header = re.compile(
-            r"^\[agents\.(?:%s|\"%s\")\][ \t]*\r?\n(.*?)(?=^\[|\Z)"
-            % (re.escape(agent_type), re.escape(agent_type)),
-            re.MULTILINE | re.DOTALL,
-        )
-        m = header.search(text)
-        if m:
-            cm = re.search(
-                r"""^config_file[ \t]*=[ \t]*(?:"([^"]*)"|'([^']*)')""",
-                m.group(1), re.MULTILINE,
-            )
+        for m in _TOML_AGENT_SECTION_RE.finditer(text):
+            cm = _TOML_CONFIG_FILE_RE.search(m.group(3))
             if cm:
-                config_file = cm.group(1) if cm.group(1) is not None else cm.group(2)
+                found[m.group(1) or m.group(2)] = (
+                    cm.group(1) if cm.group(1) is not None else cm.group(2)
+                )
 
-    if not config_file:
-        return None
-    return os.path.join(layer, os.path.expanduser(config_file))
+    return {
+        name: os.path.join(layer, os.path.expanduser(path))
+        for name, path in found.items() if path
+    }
 
 
 def find_codex_agent(agent_type, cwd, home):
@@ -356,10 +415,8 @@ def find_codex_agent(agent_type, cwd, home):
     a role declared in config.toml wins. `<name>.toml` is only the fast
     path.
     """
-    layers = [f"{d}/.codex" for d in project_dirs(cwd)]
-    layers += [codex_home_dir(home), "/etc/codex"]
-    for layer in layers:
-        declared = declared_role_file(layer, agent_type)
+    for layer in codex_layers(cwd, home):
+        declared = declared_roles(layer).get(agent_type)
         if declared and find_first_readable(declared):
             return declared, slurp(declared)
 
@@ -371,18 +428,32 @@ def find_codex_agent(agent_type, cwd, home):
             text = slurp(direct)
             if parse_toml_name(text) in (None, agent_type):
                 return direct, text
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames.sort()
-            for fn in sorted(filenames):
-                if not fn.endswith(".toml"):
-                    continue
-                path = os.path.join(dirpath, fn)
-                if path == direct:
-                    continue
-                text = slurp(path)
-                if parse_toml_name(text) == agent_type:
-                    return path, text
+        for path in _walk_files(root, ".toml"):
+            if path == direct:
+                continue
+            text = slurp(path)
+            if parse_toml_name(text) == agent_type:
+                return path, text
     return None, ""
+
+
+def list_codex_agents(cwd, home):
+    """{name: path} for every Codex role, resolved the way Codex layers them."""
+    agents = {}
+    for layer in codex_layers(cwd, home):
+        layer_agents = {
+            name: path for name, path in declared_roles(layer).items()
+            if find_first_readable(path)
+        }
+        root = f"{layer}/agents"
+        if os.path.isdir(root):
+            for path in _walk_files(root, ".toml"):
+                name = parse_toml_name(slurp(path))
+                if name:
+                    layer_agents.setdefault(name, path)
+        for name, path in layer_agents.items():
+            agents.setdefault(name, path)
+    return agents
 
 
 def resolve_skill_codex(name, cwd, home):
@@ -420,6 +491,96 @@ def resolve_skill_codex(name, cwd, home):
     return None
 
 
+# ---- the shared part: declaration -> checked briefing ------------------------
+
+LEGACY_NOTE = (
+    "declares skills in a [briefing] table. Codex 0.153+ rejects that as an "
+    "unknown field and ignores the whole agent. Replace the table with a "
+    "comment line: # briefing: skills = [...]"
+)
+
+
+def claude_declaration(path):
+    """(skills, legacy) of a Claude Code agent file."""
+    fm, _ = split_frontmatter(slurp(path))
+    return parse_skills_list(fm), False
+
+
+def codex_declaration(text):
+    """(skills, legacy) of a Codex agent file; the comment wins over a table."""
+    legacy = parse_skills_toml(text)
+    return (parse_skills_comment(text) or legacy), bool(legacy)
+
+
+class Briefing:
+    """Everything known about briefing one agent, before anything is emitted."""
+
+    def __init__(self, agent, path, skills, resolver, legacy=False):
+        self.agent = agent
+        self.path = path
+        self.skills = skills
+        self.legacy = legacy
+        self.missing = []
+        blocks = []
+        for name in skills:
+            skill_path = resolver(name)
+            if not skill_path:
+                self.missing.append(name)
+                continue
+            _, body = split_frontmatter(slurp(skill_path))
+            blocks.append(f'<skill name="{name}">\n{body.strip()}\n</skill>')
+        self.text = "\n\n".join(blocks)
+        self.size = len(self.text.encode("utf-8"))
+
+    @property
+    def oversized(self):
+        return self.size > BUDGET_BYTES
+
+    def audit_line(self):
+        kb = max(1, round(self.size / 1024)) if self.size else 0
+        return f"briefing: {self.agent} ← {', '.join(self.skills)} ({kb} kB)"
+
+    def size_note(self):
+        return (
+            f"briefing: agent '{self.agent}' is briefed with {self.size // 1024} kB "
+            f"of skill text (over {BUDGET_BYTES // 1024} kB) — consider declaring "
+            "fewer or smaller skills."
+        )
+
+    def legacy_note(self):
+        return f"briefing: {self.path} {LEGACY_NOTE}"
+
+    def missing_note(self):
+        return (
+            f"briefing: agent '{self.agent}' references unknown skill(s): "
+            + ", ".join(self.missing)
+        )
+
+
+def claude_briefing(agent, path, cwd, home):
+    skills, legacy = claude_declaration(path)
+    if not skills:
+        return None
+    return Briefing(agent, path, skills, lambda n: resolve_skill(n, cwd, home), legacy)
+
+
+def codex_briefing(agent, path, text, cwd, home):
+    skills, legacy = codex_declaration(text)
+    if not skills:
+        return None
+    return Briefing(agent, path, skills, lambda n: resolve_skill_codex(n, cwd, home), legacy)
+
+
+BRIEFING_HEADER = (
+    "# Briefing — pre-loaded skills\n\n"
+    "The skills below have been injected directly into your context by the\n"
+    "briefing plugin, one <skill> element each. Treat them as already loaded —\n"
+    "{dont}; their content is already here.\n\n"
+)
+
+
+# ---- spawn time --------------------------------------------------------------
+
 def main_codex(data):
     """SubagentStart — Codex cannot deny a spawn, so context is all we get."""
     agent_type = data.get("agent_type") or ""
@@ -433,33 +594,15 @@ def main_codex(data):
     if not agent_file:
         return 0
 
-    legacy = parse_skills_toml(text)
-    skills = parse_skills_comment(text) or legacy
-    if not skills:
+    b = codex_briefing(agent_type, agent_file, text, cwd, home)
+    if b is None:
         return 0
 
-    notes = []
-    if legacy:
-        notes.append(
-            f"briefing: {agent_file} declares skills in a [briefing] table. "
-            "Codex 0.153+ rejects that as an unknown field and ignores the whole "
-            "agent. Replace the table with a comment line: "
-            "# briefing: skills = [...]"
-        )
+    notes = [b.legacy_note()] if b.legacy else []
 
-    blocks = []
-    missing = []
-    for name in skills:
-        path = resolve_skill_codex(name, cwd, home)
-        if not path:
-            missing.append(name)
-            continue
-        _, body = split_frontmatter(slurp(path))
-        blocks.append(f"## Skill: {name}\n\n{body}")
-
-    if missing:
-        names = ", ".join(missing)
-        msg = f"briefing: agent '{agent_type}' references unknown skill(s): {names}"
+    if b.missing:
+        names = ", ".join(b.missing)
+        msg = b.missing_note()
         sys.stderr.write(msg + "\n")
         sys.stdout.write(json.dumps({
             "systemMessage": "\n".join([msg] + notes),
@@ -476,32 +619,188 @@ def main_codex(data):
         }))
         return 0
 
-    header = (
-        "# Briefing — pre-loaded skills\n\n"
-        "The skills below have been injected directly into your context by the\n"
-        "briefing plugin. Treat them as already loaded — do NOT go looking for\n"
-        "their SKILL.md files; their content is already here.\n\n"
-    )
-
-    briefing = header + "\n\n---\n\n".join(blocks)
-    note = size_note(agent_type, briefing)
-    if note:
-        notes.append(note)
-
-    out = {
-        "hookSpecificOutput": {
-            "hookEventName": "SubagentStart",
-            "additionalContext": briefing,
-        }
-    }
+    if b.oversized:
+        notes.append(b.size_note())
     if notes:
         sys.stderr.write("\n".join(notes) + "\n")
-        out["systemMessage"] = "\n".join(notes)
-    sys.stdout.write(json.dumps(out))
+
+    header = BRIEFING_HEADER.format(dont="do NOT go looking for their SKILL.md files")
+    sys.stdout.write(json.dumps({
+        "systemMessage": "\n".join([b.audit_line()] + notes),
+        "hookSpecificOutput": {
+            "hookEventName": "SubagentStart",
+            "additionalContext": header + b.text,
+        },
+    }))
     return 0
 
 
+def main_claude(data):
+    """PreToolUse on the Agent tool — rewrite the prompt, or deny the spawn."""
+    ti = data.get("tool_input") or {}
+    subagent = ti.get("subagent_type") or ""
+    if not subagent:
+        return 0
+
+    cwd = data.get("cwd") or os.environ.get("PWD") or "."
+    home = os.environ.get("HOME") or ""
+
+    agent_file = find_claude_agent(subagent, cwd, home)
+    if not agent_file:
+        return 0
+
+    b = claude_briefing(subagent, agent_file, cwd, home)
+    if b is None:
+        return 0
+
+    if b.missing:
+        msg = b.missing_note()
+        sys.stderr.write(msg + "\n")
+        sys.stdout.write(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": msg,
+            }
+        }))
+        return 0
+
+    notes = []
+    if b.oversized:
+        notes.append(b.size_note())
+        sys.stderr.write(b.size_note() + "\n")
+
+    header = BRIEFING_HEADER.format(dont="do NOT call the Skill tool for any of these names")
+    ti["prompt"] = (
+        header + b.text + "\n\n---\n\n# Original task\n\n" + (ti.get("prompt") or "")
+    )
+    sys.stdout.write(json.dumps({
+        "systemMessage": "\n".join([b.audit_line()] + notes),
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "updatedInput": ti,
+        },
+    }))
+    return 0
+
+
+# ---- before any spawn: doctor and SessionStart pre-flight -------------------
+
+HARNESSES = ("claude", "codex")
+HARNESS_LABEL = {"claude": "Claude Code", "codex": "Codex"}
+
+
+def check(cwd, home, harnesses=HARNESSES):
+    """[(harness, Briefing)] for every agent that declares skills."""
+    out = []
+    if "claude" in harnesses:
+        for name, path in sorted(list_claude_agents(cwd, home).items()):
+            b = claude_briefing(name, path, cwd, home)
+            if b is not None:
+                out.append(("claude", b))
+    if "codex" in harnesses:
+        for name, path in sorted(list_codex_agents(cwd, home).items()):
+            b = codex_briefing(name, path, slurp(path), cwd, home)
+            if b is not None:
+                out.append(("codex", b))
+    return out
+
+
+def problems(b):
+    """(failures, warnings) as short strings."""
+    fails, warns = [], []
+    if b.missing:
+        fails.append("unknown skill(s): " + ", ".join(b.missing))
+    if b.legacy:
+        fails.append("[briefing] table — Codex 0.153+ ignores this whole agent; "
+                     "use # briefing: skills = [...]")
+    if b.oversized:
+        warns.append(f"{b.size // 1024} kB of skill text, over {BUDGET_BYTES // 1024} kB")
+    return fails, warns
+
+
+def harness_of(data):
+    """Which harness sent this SessionStart — by where it keeps transcripts."""
+    tp = data.get("transcript_path") or ""
+    codex_home = os.environ.get("CODEX_HOME")
+    if "/.codex/" in tp or (codex_home and tp.startswith(codex_home.rstrip("/") + "/")):
+        return ("codex",)
+    if "/.claude/" in tp:
+        return ("claude",)
+    return HARNESSES
+
+
+def main_session_start(data):
+    """Warn the human about declarations that would fail at spawn time."""
+    if data.get("source") not in (None, "startup", "resume"):
+        return 0
+    cwd = data.get("cwd") or os.environ.get("PWD") or "."
+    home = os.environ.get("HOME") or ""
+
+    lines = []
+    for harness, b in check(cwd, home, harness_of(data)):
+        fails, warns = problems(b)
+        for p in fails + warns:
+            lines.append(f"  {HARNESS_LABEL[harness]} agent '{b.agent}': {p}")
+    if not lines:
+        return 0
+
+    shown = lines[:8]
+    if len(lines) > len(shown):
+        shown.append(f"  … and {len(lines) - len(shown)} more")
+    sys.stdout.write(json.dumps({
+        "systemMessage": "briefing: declared skills that will not work — "
+                         "run briefing-doctor for details\n" + "\n".join(shown),
+    }))
+    return 0
+
+
+def doctor(argv):
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        prog="briefing-doctor",
+        description="Check every briefing-aware agent of a project; exit 1 if "
+                    "a spawn would fail.",
+    )
+    ap.add_argument("--cwd", default=".", help="project directory (default: .)")
+    ap.add_argument("--harness", choices=("claude", "codex", "both"), default="both")
+    args = ap.parse_args(argv)
+
+    cwd = os.path.abspath(args.cwd)
+    home = os.environ.get("HOME") or ""
+    harnesses = HARNESSES if args.harness == "both" else (args.harness,)
+    results = check(cwd, home, harnesses)
+
+    print(f"briefing doctor — {cwd}")
+    if not results:
+        print("  no agents declare skills")
+        return 0
+
+    failed = False
+    for harness in harnesses:
+        entries = [b for h, b in results if h == harness]
+        if not entries:
+            continue
+        print(f"\n{HARNESS_LABEL[harness]}")
+        for b in entries:
+            fails, warns = problems(b)
+            where = os.path.relpath(b.path, cwd) if b.path.startswith(cwd + os.sep) else b.path
+            status = "FAIL" if fails else "WARN" if warns else "ok"
+            failed = failed or bool(fails)
+            print(f"  {status:<4}  {b.agent}  ({where})")
+            print(f"        {', '.join(b.skills)}  ({b.size // 1024} kB)")
+            for p in fails + warns:
+                print(f"        → {p}")
+    return 1 if failed else 0
+
+
 def main():
+    if os.path.basename(sys.argv[0]) == "briefing-doctor":
+        return doctor(sys.argv[1:])
+    if sys.argv[1:2] == ["doctor"]:
+        return doctor(sys.argv[2:])
+
     raw = sys.stdin.read()
     if not raw:
         return 0
@@ -513,83 +812,13 @@ def main():
     if not isinstance(data, dict):
         return 0
 
-    if data.get("hook_event_name") == "SubagentStart":
+    event = data.get("hook_event_name")
+    if event == "SubagentStart":
         return main_codex(data)
-
-    if data.get("tool_name") != "Agent":
-        return 0
-
-    ti = data.get("tool_input") or {}
-    subagent = ti.get("subagent_type") or ""
-    if not subagent:
-        return 0
-
-    cwd = data.get("cwd") or os.environ.get("PWD") or "."
-    home = os.environ.get("HOME") or ""
-
-    agent_file = find_first_readable(
-        f"{cwd}/.claude/agents/{subagent}.md",
-        f"{home}/.claude/agents/{subagent}.md",
-    )
-    if not agent_file:
-        return 0
-
-    fm, _ = split_frontmatter(slurp(agent_file))
-    skills = parse_skills_list(fm)
-    if not skills:
-        return 0
-
-    blocks = []
-    missing = []
-    for name in skills:
-        path = resolve_skill(name, cwd, home)
-        if not path:
-            missing.append(name)
-            continue
-        _, body = split_frontmatter(slurp(path))
-        blocks.append(f"## Skill: {name}\n\n{body}")
-
-    if missing:
-        msg = (
-            f"briefing: agent '{subagent}' references unknown skill(s): "
-            + ", ".join(missing)
-        )
-        sys.stderr.write(msg + "\n")
-        sys.stdout.write(json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": msg,
-            }
-        }))
-        return 0
-
-    original = ti.get("prompt") or ""
-    header = (
-        "# Briefing — pre-loaded skills\n\n"
-        "The skills below have been injected directly into your context by the\n"
-        "briefing plugin. Treat them as already loaded — do NOT call the Skill\n"
-        "tool for any of these names; their content is already here.\n\n"
-    )
-
-    ti["prompt"] = (
-        header
-        + "\n\n---\n\n".join(blocks)
-        + "\n\n---\n\n# Original task\n\n"
-        + original
-    )
-
-    out = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "updatedInput": ti,
-        }
-    }
-    note = size_note(subagent, "".join(blocks))
-    if note:
-        sys.stderr.write(note + "\n")
-        out["systemMessage"] = note
-    sys.stdout.write(json.dumps(out))
+    if event == "SessionStart":
+        return main_session_start(data)
+    if data.get("tool_name") == "Agent":
+        return main_claude(data)
     return 0
 
 

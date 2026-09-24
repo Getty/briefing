@@ -21,9 +21,13 @@ injection channels. One script serves both.
 ## Two harnesses, one hook script
 
 `hooks/briefing-preload` branches on `hook_event_name` in the stdin payload:
-`SubagentStart` is Codex, anything else falls through to the existing Claude
-Code path keyed on `tool_name == "Agent"`. Everything between reading the
-declaration and emitting the result is shared.
+`SubagentStart` is Codex, `SessionStart` is the pre-flight check for either,
+anything else falls through to the Claude Code path keyed on
+`tool_name == "Agent"`. Called as `briefing-doctor` (the symlink in `bin/`) or
+with `doctor` as its first argument it is a CLI instead. Everything between
+reading the declaration and emitting the result is shared: the `Briefing` class
+resolves a declaration once, and the spawn paths, the pre-flight and the doctor
+all read their verdict from it.
 
 | | Claude Code | Codex |
 |---|---|---|
@@ -81,10 +85,12 @@ shim the fallback would never be exercised on a modern interpreter.
 hooks/hooks.json             one file, both worlds; Claude Code ignores SubagentStart
 hooks/briefing-preload       the hook (Python 3, stdlib only, executable)
 hooks/briefing-marketplace-notice   SessionStart notice about the shared marketplace
+bin/briefing-doctor          symlink to the hook; Claude Code puts bin/ on PATH
 skills/briefing/SKILL.md     ships with the plugin — how to author briefing-aware agents
 examples/                    example agent + minimal skill
 tests/test_briefing.py       Claude Code path
 tests/test_briefing_codex.py Codex path
+tests/test_briefing_doctor.py  doctor CLI and SessionStart pre-flight
 ```
 
 **One `hooks.json` serves both**, verified rather than assumed: Claude Code reads
@@ -119,6 +125,25 @@ stdout: `hookSpecificOutput.updatedInput` with the rewritten prompt, or
 
 stdout: `hookSpecificOutput.additionalContext`, optionally alongside a top-level
 `systemMessage` for the human. No-op is exit 0 with empty stdout, same as always.
+
+Both spawn paths put a one-line audit into `systemMessage` on success
+(`briefing: agent ← a, b (N kB)`), plus any warnings on further lines. Skills
+are injected as `<skill name="...">` elements, frontmatter stripped.
+
+**SessionStart — stdin (both harnesses):**
+
+```json
+{
+  "hook_event_name": "SessionStart", "cwd": "/abs/path", "session_id": "...",
+  "source": "startup", "transcript_path": "/home/u/.codex/sessions/..."
+}
+```
+
+stdout: a top-level `systemMessage` listing declarations that would fail, or
+nothing. Never `hookSpecificOutput` — on SessionStart that would become model
+context. The harness is told apart by `transcript_path` (`/.codex/` or
+`$CODEX_HOME` vs `/.claude/`); when that is inconclusive, both are checked.
+Runs on `startup` and `resume` only, so compaction does not repeat it.
 
 The hook **must** be idempotent and side-effect-free. It only reads files.
 
@@ -194,6 +219,10 @@ test must be built so it cannot pass for the wrong reason:
 - **Never copy `auth.json` into a second `CODEX_HOME`.** Use the real one and
   pass everything else via `-c`. Two homes sharing one refresh token can end
   the login.
+- **`codex exec` does not print hook messages.** Codex turns a hook's
+  `systemMessage` into a `Warning` output entry, which the TUI shows and
+  `exec` (with or without `--json`) drops. To see what a hook returned, wrap
+  the installed copy in a script that logs stdin and stdout.
 - **Instrument the installed copy, not the repo.** Appending a marker that logs
   `hook_event_name` to the cached plugin under `~/.codex/plugins/cache/` proves
   which events actually arrive.
@@ -202,6 +231,15 @@ The agent lookup was verified the same way on Codex 0.153.4 — a role whose fil
 name differs from its `name` inside `agents/team/`, the same role spawned from a
 subdirectory of the repo, and a role declared via `config_file` all answered
 with the phrase; the control answered `UNKNOWN`.
+
+0.4.0 was verified in both harnesses: under Codex the declaring agent answered
+with the phrase and named the `<skill>` element it arrived in, and the logged
+`SessionStart` exchange showed the pre-flight warning for a broken agent; under
+Claude Code (`claude -p --plugin-dir` with the installed copy disabled via
+`--settings '{"enabledPlugins":{"briefing@getty":false}}'`) an agent found by
+`name` in a subdirectory answered with the phrase without a tool call, the
+control answered `UNKNOWN`, and both the audit line and the pre-flight warning
+arrived as system messages.
 
 The original implementation was verified like this: the declaring agent answered
 with the phrase, the identical non-declaring agent answered "unknown", and the

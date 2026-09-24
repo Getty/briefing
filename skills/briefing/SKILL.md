@@ -116,6 +116,14 @@ resolve — an instruction not to attempt the task and to report the
 failure. If a Codex subagent comes back saying it was not briefed,
 that is this policy working, not a bug.
 
+Nothing has to spawn to find out. At session start the hook warns
+about every declaration that would fail, and `briefing-doctor`
+(Claude Code puts it on `PATH`; under Codex run
+`<plugin root>/hooks/briefing-preload doctor`) lists every
+briefing-aware agent with its skills, their size, and what is wrong.
+It exits 1 on a failure, so it can guard CI. Run it after writing or
+migrating an agent.
+
 So: declare skills the agent genuinely depends on. Do not pad the
 list "just in case" — every name there becomes a precondition for
 the spawn to succeed.
@@ -186,7 +194,7 @@ When converting an existing agent that uses prompt-stuffing:
 ## Debugging unresolved skills
 
 If a spawn is denied with `briefing: agent 'X' references unknown
-skill(s): Y`:
+skill(s): Y` — or `briefing-doctor` reports it:
 
 1. Check spelling. Skill names are case-sensitive directory names.
 2. Check the resolution order (project → user → plugin cache).

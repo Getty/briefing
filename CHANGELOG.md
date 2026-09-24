@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.4.0 — 2026-09-24
+
+Broken declarations surface before anything spawns, and every briefing
+leaves a trace.
+
+- `briefing-doctor` checks every briefing-aware agent of a project, in both
+  harnesses: which skills it declares, how large the briefing is, and what
+  would fail — an unknown skill, or a Codex agent still carrying a
+  `[briefing]` table. Exits 1 on a failure, so it can guard CI. It is a
+  symlink to the hook in `bin/`, which Claude Code puts on `PATH`; under Codex
+  run `hooks/briefing-preload doctor`.
+- `SessionStart` pre-flight: the same checks run when a session starts or
+  resumes, for the harness that started it, and a `systemMessage` names every
+  declaration that would fail. Healthy projects hear nothing.
+- Every successful briefing reports itself in one `systemMessage` line —
+  `briefing: agent ← a, b (N kB)` — so you can see what an agent was given.
+- Skills are injected as `<skill name="...">…</skill>` elements instead of
+  `## Skill:` headings, so their boundaries are unambiguous.
+- Claude Code agents are found by their frontmatter `name`, including in
+  subdirectories of `.claude/agents/` — the same fix 0.3.1 made for Codex. A
+  file named after the agent that declares a different `name` is not it.
+- 20 new unit tests. Verified live in both harnesses — Codex 0.153.4 and
+  Claude Code: briefed agents answered from skill content inside `<skill>`
+  elements, controls did not, and the audit line and the pre-flight warning
+  reached the harness as system messages. (`codex exec` does not print those;
+  the Codex TUI does.)
+
+
 ## 0.3.1 — 2026-09-23
 
 Codex agents declare their skills in a comment now, because Codex 0.153 no

@@ -42,17 +42,13 @@ Live worklist. Tick as we go.
 
 ## v0.4 — Nice-to-have
 
-- [ ] Optional `briefing-strip-frontmatter: false` per-skill flag —
-      some skills' frontmatter is genuinely useful context.
-- [ ] Optional `briefing-format: <fenced|raw>` — wrap each skill in
-      a `<skill name="...">` XML-ish block so the agent can identify
-      boundaries unambiguously.
-- [ ] Source `skills:` from `description` text as a fallback (parse
-      the existing prose like `"Loads backend Perl skills (getty-perl-core,
-      getty-perl-moose, ...)"`) — would let existing Goldmine agents work
-      without a frontmatter rewrite. Decide later: probably reject as
-      too magical.
-- [ ] `briefing doctor` CLI: validate every agent file in a project,
+- [x] ~~Optional `briefing-strip-frontmatter: false` per-skill flag~~ —
+      rejected: frontmatter is always stripped (2026-09-24).
+- [x] Wrap each skill in a `<skill name="...">` element — the default,
+      no flag; a second format had no use case.
+- [x] ~~Source `skills:` from `description` text as a fallback~~ —
+      rejected as too magical (2026-09-24).
+- [x] `briefing-doctor` CLI: validate every agent file in a project,
       report any unresolvable skills before they bite at spawn time.
 
 ## v0.3 — Codex
@@ -75,22 +71,20 @@ Live worklist. Tick as we go.
 - [x] Find Codex agent files the way Codex does — `name` field, recursive
       `agents/`, project layers up to the root, `[agents.<name>]
       config_file` — and honour `CODEX_HOME` (karr #2).
-- [ ] Decide whether the hard-fail should also fire a `SessionStart`
-      pre-flight under Codex, so unresolvable agents surface before
-      any spawn burns tokens.
+- [x] `SessionStart` pre-flight in both harnesses — warning only, the
+      hard fail stays at spawn time.
 
 ## Open design questions
 
-- [ ] Should we strip the skill's frontmatter (`name:`, `description:`,
-      …) from the injected body? Currently yes. Some skills carry
-      important metadata in description we're throwing away.
+- [x] Strip the skill's frontmatter from the injected body? Yes, keep
+      stripping — `description` is a trigger for loading, noise once
+      loaded (decided 2026-09-24).
 - [x] Should `additionalContext` be used instead of mutating `prompt`?
       Under Codex it is the only channel, so both now exist side by
       side. Claude Code keeps prompt rewriting, which is what allows
       the hard deny.
-- [ ] How do we want to surface "skill X was pre-loaded" in the
-      transcript / UI so the user can audit? Probably a stderr line
-      that the harness prints.
+- [x] Surface "skill X was pre-loaded": one `systemMessage` line per
+      successful spawn.
 
 ## Test cases for the next session
 

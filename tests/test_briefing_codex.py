@@ -284,7 +284,8 @@ class CodexHookTests(unittest.TestCase):
 
         out = self._out(run_hook(self._payload(), fake_home=self.home))
 
-        self.assertNotIn("systemMessage", out)
+        self.assertNotIn("[briefing]", out["systemMessage"])
+        self.assertIn("quiet", out["systemMessage"])
 
     def test_large_briefing_warns_in_system_message(self):
         self._agent("""
@@ -296,7 +297,24 @@ class CodexHookTests(unittest.TestCase):
         out = self._out(run_hook(self._payload(), fake_home=self.home))
 
         self.assertIn("additionalContext", out["hookSpecificOutput"])
-        self.assertIn("kB", out["systemMessage"])
+        self.assertIn("over 64 kB", out["systemMessage"])
+
+    def test_successful_briefing_is_audited_and_wrapped(self):
+        self._agent("""
+            name = "demo"
+            # briefing: skills = ["one", "two"]
+        """)
+        self._skill("one", "ONE\n")
+        self._skill("two", "TWO\n")
+
+        out = self._out(run_hook(self._payload(), fake_home=self.home))
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+
+        self.assertRegex(ctx, r'<skill name="one">\s*ONE\s*</skill>')
+        self.assertIn('<skill name="two">', ctx)
+        self.assertEqual(len(out["systemMessage"].splitlines()), 1)
+        self.assertIn("demo", out["systemMessage"])
+        self.assertIn("one, two", out["systemMessage"])
 
     # --- finding the agent file the way Codex does -------------------------
 

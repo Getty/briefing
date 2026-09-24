@@ -135,9 +135,9 @@ class BriefingHookTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         out = json.loads(proc.stdout)
         prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
-        self.assertIn("## Skill: foo", prompt)
-        self.assertIn("## Skill: bar", prompt)
-        self.assertIn("## Skill: baz", prompt)
+        self.assertIn('<skill name="foo">', prompt)
+        self.assertIn('<skill name="bar">', prompt)
+        self.assertIn('<skill name="baz">', prompt)
         self.assertTrue(prompt.endswith("ORIGINAL"))
 
     def test_flow_list_parses(self):
@@ -154,9 +154,9 @@ class BriefingHookTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         out = json.loads(proc.stdout)
         prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
-        self.assertIn("## Skill: foo", prompt)
-        self.assertIn("## Skill: bar", prompt)
-        self.assertIn("## Skill: baz", prompt)
+        self.assertIn('<skill name="foo">', prompt)
+        self.assertIn('<skill name="bar">', prompt)
+        self.assertIn('<skill name="baz">', prompt)
 
     def test_briefing_block_coexists_with_other_frontmatter(self):
         write(self.cwd / ".claude/agents/demo.md", """
@@ -254,7 +254,7 @@ class BriefingHookTests(unittest.TestCase):
         proc = run_hook(self._payload(), fake_home=self.home)
         out = json.loads(proc.stdout)
         prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
-        self.assertIn("## Skill: superpowers:brainstorming", prompt)
+        self.assertIn('<skill name="superpowers:brainstorming">', prompt)
         self.assertIn("BRAIN BODY", prompt)
 
     def test_namespaced_skill_nested_owner(self):
@@ -336,8 +336,8 @@ class BriefingHookTests(unittest.TestCase):
         proc = run_hook(self._payload(), fake_home=self.home)
         out = json.loads(proc.stdout)
         self.assertIn("updatedInput", out["hookSpecificOutput"])
-        self.assertIn("kB", out["systemMessage"])
-        self.assertIn("kB", proc.stderr)
+        self.assertIn("over 64 kB", out["systemMessage"])
+        self.assertIn("over 64 kB", proc.stderr)
 
     def test_small_briefing_has_no_size_warning(self):
         write(self.cwd / ".claude/agents/demo.md", """
@@ -350,7 +350,7 @@ class BriefingHookTests(unittest.TestCase):
         """)
         write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO")
         out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
-        self.assertNotIn("systemMessage", out)
+        self.assertNotIn("over 64 kB", out["systemMessage"])
 
     def test_skills_are_leaves_not_expanded_recursively(self):
         # A skill that itself declares briefing.skills is injected as it is;
@@ -378,6 +378,87 @@ class BriefingHookTests(unittest.TestCase):
         prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
         self.assertEqual(prompt.count("OUTER BODY"), 1)
         self.assertNotIn("INNER BODY", prompt)
+
+    # --- what the human and the agent see ------------------------------
+
+    def test_successful_briefing_is_audited_in_one_line(self):
+        write(self.cwd / ".claude/agents/demo.md", """
+            ---
+            briefing:
+              skills:
+                - foo
+                - bar
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO")
+        write(self.cwd / ".claude/skills/bar/SKILL.md", "BAR")
+        out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
+        msg = out["systemMessage"]
+        self.assertEqual(len(msg.splitlines()), 1)
+        self.assertIn("demo", msg)
+        self.assertIn("foo, bar", msg)
+        self.assertIn("kB", msg)
+
+    def test_each_skill_is_wrapped_in_a_skill_element(self):
+        write(self.cwd / ".claude/agents/demo.md", """
+            ---
+            briefing:
+              skills:
+                - foo
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "---\nname: foo\n---\nFOO BODY\n")
+        out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
+        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        self.assertRegex(prompt, r'<skill name="foo">\s*FOO BODY\s*</skill>')
+        self.assertNotIn("## Skill:", prompt)
+        self.assertTrue(prompt.rstrip().endswith("ORIGINAL"))
+
+    # --- finding the agent the way Claude Code does ----------------------
+
+    def test_agent_found_by_frontmatter_name_not_file_name(self):
+        write(self.cwd / ".claude/agents/some-file.md", """
+            ---
+            name: demo
+            briefing:
+              skills:
+                - foo
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "BY NAME")
+        out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
+        self.assertIn("BY NAME", out["hookSpecificOutput"]["updatedInput"]["prompt"])
+
+    def test_agent_found_in_subdirectory(self):
+        write(self.cwd / ".claude/agents/team/demo.md", """
+            ---
+            name: demo
+            briefing:
+              skills:
+                - foo
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "NESTED")
+        out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
+        self.assertIn("NESTED", out["hookSpecificOutput"]["updatedInput"]["prompt"])
+
+    def test_file_named_after_agent_but_named_otherwise_is_not_it(self):
+        write(self.cwd / ".claude/agents/demo.md", """
+            ---
+            name: someone-else
+            briefing:
+              skills:
+                - foo
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "WRONG")
+        proc = run_hook(self._payload(), fake_home=self.home)
+        self.assertEqual(proc.stdout, "")
 
 
 if __name__ == "__main__":

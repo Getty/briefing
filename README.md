@@ -51,7 +51,7 @@ found, nothing proceeds on a partial briefing.
 | | Claude Code | Codex |
 |---|---|---|
 | Hook event | `PreToolUse` on the `Agent` tool | `SubagentStart` |
-| Agent definition | `.claude/agents/<name>.md` | `.codex/agents/*.toml` |
+| Agent definition | `.claude/agents/*.md`, by `name` | `.codex/agents/*.toml`, by `name` |
 | Declaration | `briefing.skills` in frontmatter | `# briefing: skills = [...]` comment |
 | Injection | rewrites the agent's prompt | `additionalContext` |
 | Missing skill | spawn is **denied** | agent starts, told to abort |
@@ -60,6 +60,48 @@ The last row is not a choice. A `SubagentStart` hook cannot stop a spawn — Cod
 parses `continue: false` for compatibility but ignores it. So under Codex the
 nearest honest equivalent is an agent that starts and refuses: instead of skills
 it receives an instruction not to attempt the task and to report the failure.
+
+Each skill arrives wrapped in its own element, so the agent can tell where one
+ends and the next begins:
+
+```
+<skill name="getty-perl-core">
+…the SKILL.md body, frontmatter stripped…
+</skill>
+```
+
+Every successful briefing leaves one line for you, not for the model:
+`briefing: my-agent ← getty-perl-core, superpowers:brainstorming (14 kB)`. Above
+64 kB of skill text a second line says so — the spawn still goes ahead.
+
+## Checking before anything spawns
+
+A broken declaration should not cost a spawn to discover. At session start the
+hook checks every briefing-aware agent of the harness you are in and, if any
+would fail, tells you which and why. A healthy project hears nothing.
+
+For the full picture, run the doctor:
+
+```sh
+briefing-doctor                 # this project, both harnesses
+briefing-doctor --cwd ~/dev/x --harness codex
+```
+
+```
+briefing doctor — /home/me/dev/x
+
+Claude Code
+  ok    reviewer  (.claude/agents/reviewer.md)
+        getty-perl-core, kanban-issues-karr-cli  (13 kB)
+  FAIL  backend  (.claude/agents/backend.md)
+        getty-perl-core, kubernetes-rest  (18 kB)
+        → unknown skill(s): kubernetes-rest
+```
+
+It exits 1 if any spawn would fail — an unknown skill, or a Codex agent still
+carrying a `[briefing]` table — so it works in CI. Claude Code puts
+`briefing-doctor` on `PATH` for the agent; Codex plugins cannot, so there run
+`python3 <plugin root>/hooks/briefing-preload doctor`.
 
 ## Declaring skills
 
