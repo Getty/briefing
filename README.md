@@ -199,6 +199,11 @@ Codex asks you to trust a plugin's hooks before it runs them. Until you do,
 spawn unbriefed. If skills are not arriving, check the hook trust prompt first.
 Non-interactive runs (`codex exec`) cannot grant that trust at all.
 
+To update under Codex, run `codex plugin add briefing@getty` again.
+`codex plugin marketplace upgrade getty` refreshes only the catalog, and the
+catalog points at this repo's `main` without a version, so it does not change
+when briefing does. A new release that adds hooks asks for trust once more.
+
 ## Authoring briefing-aware agents
 
 The plugin ships a `briefing` skill documenting how to write agents that use it
