@@ -6,3 +6,7 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# karr materialized task view -- never commit
+tasks/
+config.yml
