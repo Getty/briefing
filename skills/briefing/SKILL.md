@@ -201,9 +201,14 @@ skill(s): Y` — or `briefing-doctor` reports it:
    The skill must exist as `<base>/skills/<name>/SKILL.md` for some
    base in that order.
 3. For namespaced names (`plugin:skill`), the plugin must be
-   installed in the local plugin cache —
-   `~/.claude/plugins/cache/<plugin>/skills/<skill>/SKILL.md` or a
-   nested-owner equivalent.
+   installed for this project — listed in
+   `~/.claude/plugins/installed_plugins.json`, user-wide or with a
+   `projectPath` that contains the working directory — and the skill
+   must be one Claude Code loads from its `installPath`:
+   `skills/<skill>/SKILL.md`, or under a path the plugin's
+   `plugin.json` lists in `skills`. A skill nested deeper that the
+   manifest does not list is invisible to Claude Code and to
+   briefing alike.
 4. There is no fallback. If you want the skill to be optional,
    it does not belong in `briefing.skills`. Either inline the
    relevant guidance into the agent body, or have the agent invoke

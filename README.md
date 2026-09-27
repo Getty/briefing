@@ -156,8 +156,12 @@ reinterpreting it would take away your ability to say one without the other.
 
 Skill names resolve the same way in both worlds:
 
-- **bare** (`getty-perl-core`) — project skills, then user skills, then plugin caches.
+- **bare** (`getty-perl-core`) — project skills, then user skills, then installed plugins.
 - **namespaced** (`superpowers:brainstorming`) — straight to that plugin's skills.
+
+A plugin's skills are the ones the harness itself loads from the installed
+version — under Claude Code `skills/<name>/` plus whatever the plugin's
+`plugin.json` lists under `skills`.
 
 Only the roots differ, and each side searches exactly where its own harness
 looks: `.claude/skills/` for Claude Code; `.codex/skills/` and `.agents/skills/`

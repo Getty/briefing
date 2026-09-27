@@ -155,8 +155,20 @@ The hook **must** be idempotent and side-effect-free. It only reads files.
 Each side searches exactly where its own harness looks — that is the whole rule,
 and it is why bare names stay portable.
 
-**Claude Code**: `<cwd>/.claude/skills` → `~/.claude/skills` →
-`~/.claude/plugins/cache/*/skills` → `~/.claude/plugins/cache/*/*/skills`.
+**Claude Code**: `<cwd>/.claude/skills` → `~/.claude/skills` → installed
+plugins. Plugins are found through `~/.claude/plugins/installed_plugins.json`,
+never by globbing the cache: the cache keeps
+`<marketplace>/<plugin>/<version>/` directories of versions that are no longer
+installed, and some versions are commit hashes, so no ordering of them finds the
+live one. An entry's `installPath` is the plugin root; project- and
+local-scoped entries count only when `<cwd>` is inside their `projectPath`, and
+come first. Within a root, a skill is what Claude Code loads: `skills/<name>/`,
+plus each path in the manifest's `skills` (one skill directory, or a directory
+of them — mattpocock-skills uses this for `skills/<category>/<name>/`).
+Anything nested deeper and not listed is not a skill to Claude Code, so not to
+us either. The namespace in `plugin:skill` is the manifest's `name`, which may
+differ from the directory. Marketplace entries can add `skills` too; that is not
+read yet.
 
 **Codex**: for each directory from `<cwd>` up to the project root (nearest
 `.git`, Codex's default `project_root_markers`), nearest first: `.codex/skills`

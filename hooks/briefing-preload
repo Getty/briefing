@@ -171,35 +171,96 @@ def list_claude_agents(cwd, home):
     return agents
 
 
+def _load_json(path):
+    try:
+        data = json.loads(slurp(path) or "{}")
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _within(path, root):
+    path, root = os.path.normpath(path), os.path.normpath(root)
+    return path == root or path.startswith(root.rstrip("/") + "/")
+
+
+def claude_plugins(cwd, home):
+    """(namespace, root, manifest) of every plugin Claude Code has installed
+    for `cwd`, project-scoped installs first.
+
+    installed_plugins.json is the index, not the cache: the cache keeps
+    versions that are no longer installed, and some versions are commit
+    hashes, so no ordering of the version directories finds the live one.
+    """
+    plugins = _load_json(f"{home}/.claude/plugins/installed_plugins.json").get("plugins")
+    if not isinstance(plugins, dict):
+        return []
+    found = []
+    for key, entries in plugins.items():
+        for e in entries if isinstance(entries, list) else ():
+            root = e.get("installPath") if isinstance(e, dict) else None
+            if not isinstance(root, str):
+                continue
+            project = e.get("projectPath")
+            if isinstance(project, str) and project:
+                if not _within(cwd, project):
+                    continue
+                found.append((-len(project), key, root))
+            else:
+                found.append((0, key, root))
+    out = []
+    for _, key, root in sorted(found):
+        manifest = _load_json(f"{root}/.claude-plugin/plugin.json")
+        name = manifest.get("name")
+        out.append((name if isinstance(name, str) else key.partition("@")[0],
+                    root, manifest))
+    return out
+
+
+def plugin_skill_dirs(root, manifest):
+    """Every skill directory Claude Code loads from the plugin at `root`: the
+    default skills/<name>/ scan, plus the manifest's `skills` paths, each one
+    skill directory or a directory of them."""
+    extra = manifest.get("skills")
+    extra = [extra] if isinstance(extra, str) else extra
+    bases = [f"{root}/skills"] + [
+        os.path.normpath(os.path.join(root, p))
+        for p in (extra if isinstance(extra, list) else ())
+        if isinstance(p, str)
+    ]
+    for base in bases:
+        if not _within(base, root):
+            continue
+        if os.path.isfile(f"{base}/SKILL.md"):
+            yield base
+        elif os.path.isdir(base):
+            for d in sorted(os.listdir(base)):
+                if os.path.isfile(f"{base}/{d}/SKILL.md"):
+                    yield f"{base}/{d}"
+
+
+def resolve_plugin_skill(skill, cwd, home, plugin=None):
+    for name, root, manifest in claude_plugins(cwd, home):
+        if plugin is None or name == plugin:
+            for d in plugin_skill_dirs(root, manifest):
+                if os.path.basename(d) == skill and os.access(f"{d}/SKILL.md", os.R_OK):
+                    return f"{d}/SKILL.md"
+    return None
+
+
 def resolve_skill(name, cwd, home):
     # explicit plugin namespace: plugin:skill
     if ":" in name and not name.startswith(":"):
         plugin, _, skill = name.partition(":")
         if plugin and skill and " " not in plugin:
-            direct = f"{home}/.claude/plugins/cache/{plugin}/skills/{skill}/SKILL.md"
-            if os.access(direct, os.R_OK):
-                return direct
-            for g in glob.glob(
-                f"{home}/.claude/plugins/cache/*/{plugin}/skills/{skill}/SKILL.md"
-            ):
-                if os.access(g, os.R_OK):
-                    return g
-            return None
+            return resolve_plugin_skill(skill, cwd, home, plugin)
 
     for base in (f"{cwd}/.claude/skills", f"{home}/.claude/skills"):
         p = f"{base}/{name}/SKILL.md"
         if os.access(p, os.R_OK):
             return p
 
-    for pat in (
-        f"{home}/.claude/plugins/cache/*/skills/{name}/SKILL.md",
-        f"{home}/.claude/plugins/cache/*/*/skills/{name}/SKILL.md",
-    ):
-        for g in glob.glob(pat):
-            if os.access(g, os.R_OK):
-                return g
-
-    return None
+    return resolve_plugin_skill(name, cwd, home)
 
 
 _TOML_COMMENT_RE = re.compile(

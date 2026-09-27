@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.1 — 2026-09-27
+
+- `plugin:skill` resolves under Claude Code. The hook globbed
+  `plugins/cache/<plugin>/skills/` and `cache/*/<plugin>/skills/`, but Claude
+  Code installs to `cache/<marketplace>/<plugin>/<version>/`, so every
+  namespaced skill — and every bare name meant to come from a plugin — was
+  denied as unknown. Plugins are now found through `installed_plugins.json`,
+  which names the live version (the cache keeps stale ones, and some versions
+  are commit hashes) and scopes project installs to their project. Within a
+  plugin, briefing loads what Claude Code loads: `skills/<name>/` plus the
+  paths the manifest lists under `skills`, which is how mattpocock-skills
+  exposes `skills/engineering/domain-modeling/`. The namespace is the
+  manifest's `name`.
+
 ## 0.5.0 — 2026-09-24
 
 - Each `<skill>` element carries the skill's absolute directory:

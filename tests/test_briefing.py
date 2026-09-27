@@ -34,6 +34,27 @@ def write(path: Path, body: str):
     path.write_text(textwrap.dedent(body).lstrip("\n"), encoding="utf-8")
 
 
+def install_plugin(home, name, *, version="1.0.0", marketplace="mp",
+                   skills=(), manifest=None, scope="user", project=None):
+    """Lay a plugin out the way Claude Code installs it: a versioned cache
+    directory, registered in installed_plugins.json. `skills` maps a path
+    below the plugin root to a SKILL.md body."""
+    root = home / ".claude/plugins/cache" / marketplace / name / version
+    for rel, body in dict(skills).items():
+        write(root / rel / "SKILL.md", body)
+    if manifest is not None:
+        write(root / ".claude-plugin/plugin.json", json.dumps(manifest))
+    index = home / ".claude/plugins/installed_plugins.json"
+    data = (json.loads(index.read_text()) if index.exists()
+            else {"version": 2, "plugins": {}})
+    entry = {"scope": scope, "installPath": str(root), "version": version}
+    if project is not None:
+        entry["projectPath"] = str(project)
+    data["plugins"].setdefault(f"{name}@{marketplace}", []).append(entry)
+    write(index, json.dumps(data))
+    return root
+
+
 class BriefingHookTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -55,6 +76,17 @@ class BriefingHookTests(unittest.TestCase):
             "tool_input": ti,
             **overrides,
         }
+
+    def _declare(self, *skills):
+        items = "".join(f"\n    - {s}" for s in skills)
+        write(self.cwd / ".claude/agents/demo.md",
+              f"---\nbriefing:\n  skills:{items}\n---\nbody\n")
+
+    def _briefed(self):
+        """The rewritten prompt, or None if the spawn was not briefed."""
+        proc = run_hook(self._payload(), fake_home=self.home)
+        hso = json.loads(proc.stdout)["hookSpecificOutput"]
+        return hso.get("updatedInput", {}).get("prompt")
 
     # --- passthrough cases ----------------------------------------------
 
@@ -198,83 +230,98 @@ class BriefingHookTests(unittest.TestCase):
         self.assertNotIn("USER FOO", prompt)
 
     def test_user_beats_plugin(self):
-        write(self.cwd / ".claude/agents/demo.md", """
-            ---
-            briefing:
-              skills:
-                - foo
-            ---
-            body
-        """)
+        self._declare("foo")
         write(self.home / ".claude/skills/foo/SKILL.md", "USER FOO")
-        write(
-            self.home / ".claude/plugins/cache/somepl/skills/foo/SKILL.md",
-            "PLUGIN FOO",
-        )
-        proc = run_hook(self._payload(), fake_home=self.home)
-        out = json.loads(proc.stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        install_plugin(self.home, "somepl", skills={"skills/foo": "PLUGIN FOO"})
+        prompt = self._briefed()
         self.assertIn("USER FOO", prompt)
         self.assertNotIn("PLUGIN FOO", prompt)
 
     def test_plugin_cache_resolves(self):
-        write(self.cwd / ".claude/agents/demo.md", """
-            ---
-            briefing:
-              skills:
-                - foo
-            ---
-            body
-        """)
-        write(
-            self.home / ".claude/plugins/cache/somepl/skills/foo/SKILL.md",
-            "PLUGIN FOO",
-        )
-        proc = run_hook(self._payload(), fake_home=self.home)
-        out = json.loads(proc.stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
-        self.assertIn("PLUGIN FOO", prompt)
+        self._declare("foo")
+        install_plugin(self.home, "somepl", skills={"skills/foo": "PLUGIN FOO"})
+        self.assertIn("PLUGIN FOO", self._briefed())
 
     # --- namespaced form -----------------------------------------------
 
     def test_namespaced_skill(self):
-        write(self.cwd / ".claude/agents/demo.md", """
-            ---
-            briefing:
-              skills:
-                - superpowers:brainstorming
-            ---
-            body
-        """)
-        write(
-            self.home
-            / ".claude/plugins/cache/superpowers/skills/brainstorming/SKILL.md",
-            "BRAIN BODY",
-        )
-        proc = run_hook(self._payload(), fake_home=self.home)
-        out = json.loads(proc.stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        self._declare("superpowers:brainstorming")
+        install_plugin(self.home, "superpowers", version="6.4.1",
+                       skills={"skills/brainstorming": "BRAIN BODY"})
+        prompt = self._briefed()
         self.assertIn('<skill name="superpowers:brainstorming"', prompt)
         self.assertIn("BRAIN BODY", prompt)
 
-    def test_namespaced_skill_nested_owner(self):
-        write(self.cwd / ".claude/agents/demo.md", """
-            ---
-            briefing:
-              skills:
-                - superpowers:brainstorming
-            ---
-            body
-        """)
-        write(
-            self.home
-            / ".claude/plugins/cache/owner/superpowers/skills/brainstorming/SKILL.md",
-            "NESTED BRAIN",
+    def test_namespaced_skill_comes_from_the_installed_version(self):
+        # The cache keeps versions that are no longer installed, and some
+        # versions are commit hashes, so neither "highest" nor "newest" is
+        # a safe guess. installed_plugins.json says which one is live.
+        self._declare("superpowers:brainstorming")
+        install_plugin(self.home, "superpowers", version="6.3.0",
+                       skills={"skills/brainstorming": "INSTALLED"})
+        write(self.home / ".claude/plugins/cache/mp/superpowers/6.4.1"
+              "/skills/brainstorming/SKILL.md", "NOT INSTALLED")
+        prompt = self._briefed()
+        self.assertIn("INSTALLED", prompt)
+        self.assertNotIn("NOT INSTALLED", prompt)
+
+    def test_namespaced_skill_the_manifest_places_in_a_category(self):
+        self._declare("mattpocock-skills:domain-modeling")
+        install_plugin(
+            self.home, "mattpocock-skills", version="1.2.3",
+            skills={"skills/engineering/domain-modeling": "DOMAIN BODY"},
+            manifest={"name": "mattpocock-skills",
+                      "skills": ["./skills/engineering/domain-modeling"]},
         )
-        proc = run_hook(self._payload(), fake_home=self.home)
-        out = json.loads(proc.stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
-        self.assertIn("NESTED BRAIN", prompt)
+        prompt = self._briefed()
+        self.assertIn("DOMAIN BODY", prompt)
+        skill_dir = os.path.abspath(
+            self.home / ".claude/plugins/cache/mp/mattpocock-skills/1.2.3"
+            "/skills/engineering/domain-modeling")
+        self.assertIn('dir="%s"' % skill_dir, prompt)
+
+    def test_manifest_skills_path_may_hold_several_skills(self):
+        self._declare("somepl:tool")
+        install_plugin(self.home, "somepl",
+                       skills={"extra-skills/tool": "EXTRA TOOL"},
+                       manifest={"name": "somepl", "skills": "./extra-skills/"})
+        self.assertIn("EXTRA TOOL", self._briefed())
+
+    def test_manifest_skills_add_to_the_default_scan(self):
+        self._declare("somepl:plain", "somepl:extra")
+        install_plugin(self.home, "somepl",
+                       skills={"skills/plain": "PLAIN", "more/extra": "EXTRA"},
+                       manifest={"name": "somepl", "skills": ["./more/extra"]})
+        prompt = self._briefed()
+        self.assertIn("PLAIN", prompt)
+        self.assertIn("EXTRA", prompt)
+
+    def test_nested_skill_the_manifest_does_not_declare_is_unknown(self):
+        # Claude Code scans skills/<name>/ and the manifest's paths, nothing
+        # deeper, so neither does briefing.
+        self._declare("somepl:draft")
+        install_plugin(self.home, "somepl",
+                       skills={"skills/in-progress/draft": "DRAFT"},
+                       manifest={"name": "somepl"})
+        self.assertIsNone(self._briefed())
+
+    def test_plugin_namespace_is_the_manifest_name(self):
+        self._declare("real-name:tool")
+        install_plugin(self.home, "entry-name",
+                       skills={"skills/tool": "BY MANIFEST NAME"},
+                       manifest={"name": "real-name"})
+        self.assertIn("BY MANIFEST NAME", self._briefed())
+
+    def test_project_scoped_plugin_serves_only_its_project(self):
+        self._declare("somepl:tool")
+        install_plugin(self.home, "somepl", skills={"skills/tool": "TOOL"},
+                       scope="project", project=self.root / "elsewhere")
+        self.assertIsNone(self._briefed())
+
+        install_plugin(self.home, "somepl", version="2.0.0",
+                       skills={"skills/tool": "HERE"},
+                       scope="project", project=self.cwd)
+        self.assertIn("HERE", self._briefed())
 
     # --- hard-fail -----------------------------------------------------
 
