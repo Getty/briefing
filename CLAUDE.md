@@ -162,7 +162,14 @@ never by globbing the cache: the cache keeps
 installed, and some versions are commit hashes, so no ordering of them finds the
 live one. An entry's `installPath` is the plugin root; project- and
 local-scoped entries count only when `<cwd>` is inside their `projectPath`, and
-come first. Within a root, a skill is what Claude Code loads: `skills/<name>/`,
+come first. A plugin counts only while it is enabled: `enabledPlugins`, merged
+across `~/.claude/settings.json`, the project's `.claude/settings.json` and its
+`.claude/settings.local.json` (higher winning per key), keyed by
+`<plugin>@<marketplace>`. An installed marketplace plugin is off until an entry
+turns it on — absent or `false` means disabled — and Claude Code loads a
+disabled plugin's skills for no one, so neither do we. `--settings` and managed
+settings sit above a hook's reach, so a plugin enabled only there reads as
+absent. Within a root, a skill is what Claude Code loads: `skills/<name>/`,
 plus each path in the manifest's `skills` (one skill directory, or a directory
 of them — mattpocock-skills uses this for `skills/<category>/<name>/`).
 Anything nested deeper and not listed is not a skill to Claude Code, so not to

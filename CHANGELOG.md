@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.2 — 2026-09-28
+
+- A `plugin:skill` — and a bare name that falls through to a plugin — resolves
+  only from a plugin Claude Code actually loads: one turned on in
+  `enabledPlugins`. An installed marketplace plugin is off until a settings
+  file enables it, so briefing could previously brief a skill from a disabled
+  plugin — context Claude Code itself would never load, the exact divergence
+  this plugin exists to prevent. Resolution is now gated on the merged
+  `enabledPlugins` map (user, then project, then project-local; higher wins per
+  key). `--settings` and managed settings are beyond a hook's reach and read as
+  absent.
+
 ## 0.5.1 — 2026-09-27
 
 - `plugin:skill` resolves under Claude Code. The hook globbed

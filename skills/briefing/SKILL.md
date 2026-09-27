@@ -208,7 +208,11 @@ skill(s): Y` — or `briefing-doctor` reports it:
    `skills/<skill>/SKILL.md`, or under a path the plugin's
    `plugin.json` lists in `skills`. A skill nested deeper that the
    manifest does not list is invisible to Claude Code and to
-   briefing alike.
+   briefing alike. The plugin must also be **enabled** — turned on
+   in `enabledPlugins` across your user, project and project-local
+   `settings.json`. An installed marketplace plugin that no
+   `enabledPlugins` entry switches on is off, and briefing skips it
+   just as Claude Code does.
 4. There is no fallback. If you want the skill to be optional,
    it does not belong in `briefing.skills`. Either inline the
    relevant guidance into the agent body, or have the agent invoke

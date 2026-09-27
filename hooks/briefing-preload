@@ -184,19 +184,47 @@ def _within(path, root):
     return path == root or path.startswith(root.rstrip("/") + "/")
 
 
+def enabled_plugins(cwd, home):
+    """The merged enabledPlugins map, `<plugin>@<origin>` -> bool, from the
+    settings files a hook can see — user, then project, then project-local,
+    each winning per key over the one before.
+
+    Claude Code layers `--settings` and managed settings above these, but a
+    hook is handed neither, so a plugin enabled or disabled *only* there is
+    read here as if the setting were absent.
+    """
+    merged = {}
+    for path in (f"{home}/.claude/settings.json",
+                 f"{cwd}/.claude/settings.json",
+                 f"{cwd}/.claude/settings.local.json"):
+        ep = _load_json(path).get("enabledPlugins")
+        if isinstance(ep, dict):
+            for key, val in ep.items():
+                if isinstance(val, bool):
+                    merged[key] = val
+    return merged
+
+
 def claude_plugins(cwd, home):
     """(namespace, root, manifest) of every plugin Claude Code has installed
-    for `cwd`, project-scoped installs first.
+    AND enabled for `cwd`, project-scoped installs first.
 
     installed_plugins.json is the index, not the cache: the cache keeps
     versions that are no longer installed, and some versions are commit
     hashes, so no ordering of the version directories finds the live one.
+
+    An installed marketplace plugin is off until enabledPlugins turns it on,
+    so a name absent from the merged map is skipped — matching Claude Code,
+    which loads a disabled plugin's skills for no one.
     """
     plugins = _load_json(f"{home}/.claude/plugins/installed_plugins.json").get("plugins")
     if not isinstance(plugins, dict):
         return []
+    enabled = enabled_plugins(cwd, home)
     found = []
     for key, entries in plugins.items():
+        if not enabled.get(key, False):
+            continue
         for e in entries if isinstance(entries, list) else ():
             root = e.get("installPath") if isinstance(e, dict) else None
             if not isinstance(root, str):

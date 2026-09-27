@@ -161,7 +161,9 @@ Skill names resolve the same way in both worlds:
 
 A plugin's skills are the ones the harness itself loads from the installed
 version — under Claude Code `skills/<name>/` plus whatever the plugin's
-`plugin.json` lists under `skills`.
+`plugin.json` lists under `skills`, and only from a plugin that is enabled.
+A marketplace plugin switched off (or never switched on) in `enabledPlugins`
+resolves to nothing, exactly as it does for Claude Code itself.
 
 Only the roots differ, and each side searches exactly where its own harness
 looks: `.claude/skills/` for Claude Code; `.codex/skills/` and `.agents/skills/`

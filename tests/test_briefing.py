@@ -34,11 +34,24 @@ def write(path: Path, body: str):
     path.write_text(textwrap.dedent(body).lstrip("\n"), encoding="utf-8")
 
 
+def enable_plugin(settings_file, key, value):
+    """Record enabledPlugins[key]=value in a Claude Code settings.json the way
+    the CLI does when a plugin is enabled or disabled, merging into whatever
+    the file already holds."""
+    data = (json.loads(settings_file.read_text())
+            if settings_file.exists() else {})
+    data.setdefault("enabledPlugins", {})[key] = value
+    write(settings_file, json.dumps(data))
+
+
 def install_plugin(home, name, *, version="1.0.0", marketplace="mp",
-                   skills=(), manifest=None, scope="user", project=None):
+                   skills=(), manifest=None, scope="user", project=None,
+                   enabled=True):
     """Lay a plugin out the way Claude Code installs it: a versioned cache
-    directory, registered in installed_plugins.json. `skills` maps a path
-    below the plugin root to a SKILL.md body."""
+    directory, registered in installed_plugins.json, and enabled in the user
+    settings.json. `skills` maps a path below the plugin root to a SKILL.md
+    body. `enabled` mirrors the enabledPlugins entry the CLI writes: True or
+    False sets it; None leaves the plugin unlisted (never enabled)."""
     root = home / ".claude/plugins/cache" / marketplace / name / version
     for rel, body in dict(skills).items():
         write(root / rel / "SKILL.md", body)
@@ -52,6 +65,9 @@ def install_plugin(home, name, *, version="1.0.0", marketplace="mp",
         entry["projectPath"] = str(project)
     data["plugins"].setdefault(f"{name}@{marketplace}", []).append(entry)
     write(index, json.dumps(data))
+    if enabled is not None:
+        enable_plugin(home / ".claude/settings.json",
+                      f"{name}@{marketplace}", enabled)
     return root
 
 
@@ -322,6 +338,46 @@ class BriefingHookTests(unittest.TestCase):
                        skills={"skills/tool": "HERE"},
                        scope="project", project=self.cwd)
         self.assertIn("HERE", self._briefed())
+
+    # --- plugin enablement ---------------------------------------------
+
+    def test_disabled_plugin_is_unknown(self):
+        # enabledPlugins says false, so Claude Code loads none of its skills;
+        # briefing must not resolve one either.
+        self._declare("somepl:tool")
+        install_plugin(self.home, "somepl",
+                       skills={"skills/tool": "TOOL"}, enabled=False)
+        self.assertIsNone(self._briefed())
+
+    def test_plugin_never_enabled_is_unknown(self):
+        # A marketplace plugin fetched into installed_plugins.json but absent
+        # from every enabledPlugins map is disabled by default.
+        self._declare("somepl:tool")
+        install_plugin(self.home, "somepl",
+                       skills={"skills/tool": "TOOL"}, enabled=None)
+        self.assertIsNone(self._briefed())
+
+    def test_bare_name_skips_a_disabled_plugin(self):
+        self._declare("tool")
+        install_plugin(self.home, "somepl",
+                       skills={"skills/tool": "TOOL"}, enabled=False)
+        self.assertIsNone(self._briefed())
+
+    def test_local_settings_re_enable_a_user_disabled_plugin(self):
+        # Precedence: project-local settings win over user settings.
+        self._declare("somepl:tool")
+        install_plugin(self.home, "somepl",
+                       skills={"skills/tool": "TOOL"}, enabled=False)
+        enable_plugin(self.cwd / ".claude/settings.local.json",
+                      "somepl@mp", True)
+        self.assertIn("TOOL", self._briefed())
+
+    def test_local_settings_disable_a_user_enabled_plugin(self):
+        self._declare("somepl:tool")
+        install_plugin(self.home, "somepl", skills={"skills/tool": "TOOL"})
+        enable_plugin(self.cwd / ".claude/settings.local.json",
+                      "somepl@mp", False)
+        self.assertIsNone(self._briefed())
 
     # --- hard-fail -----------------------------------------------------
 
