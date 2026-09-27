@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-09-27T03:24:59Z
+claimed_by: briefing
+class: standard
+completed: 2026-09-27T23:08:50Z
+created: 2026-09-27T02:42:56Z
+id: 3
+priority: medium
+started: 2026-09-27T23:08:50Z
+status: done
+tags:
+- bug
+- resolve
+- claude-code
+title: 'Claude Code: plugin:skill never resolves against the versioned plugin cache'
+updated: 2026-09-27T23:08:50Z
+---
+
+Found 2026-09-27 while wiring karr-doc-writer in ../karr: briefing.skills entry `mattpocock-skills:domain-modeling` -> spawn denied ("references unknown skill(s)"), although the skill is installed and loads fine via the Skill tool.
+
+Claude Code caches plugins as ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills/..., e.g.
+  ~/.claude/plugins/cache/claude-plugins-official/mattpocock-skills/1.2.3/skills/engineering/domain-modeling/SKILL.md
+
+resolve_skill (hooks/briefing-preload:174) only globs
+  cache/<plugin>/skills/<skill>/SKILL.md
+  cache/*/<plugin>/skills/<skill>/SKILL.md        (:183)
+and for bare names cache/*/skills/<name> and cache/*/*/skills/<name> (:196) -- no <version> segment in any of them. The Codex resolver (:459ff) already knows about the versioned path.
+
+Second gap: some plugins nest skills one level deeper by category (mattpocock-skills: skills/{engineering,productivity,misc,...}/<skill>/), which neither pattern reaches.
+
+Expected: plugin:skill resolves the way Claude Code itself resolves it -- versioned cache dir (pick the installed/highest version), and a skill dir found anywhere under the plugin's skills/ tree. Add a test with a fake versioned + category-nested cache.
