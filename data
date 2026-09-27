@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-09-27T23:36:15Z
+claimed_by: briefing
+class: standard
+completed: 2026-09-27T23:36:15Z
+created: 2026-09-27T23:26:41Z
+id: 4
+priority: medium
+started: 2026-09-27T23:36:15Z
+status: done
+tags:
+- bug
+- resolve
+- claude-code
+title: 'Claude Code: resolve_skill ignores enabledPlugins (disabled plugins still
+  resolve)'
+updated: 2026-09-27T23:36:15Z
+---
+
+Follow-up to #3. briefing resolves a plugin:skill (and bare names that fall through to plugins) from installed_plugins.json, but never consults enabledPlugins. A plugin that is installed yet disabled via `"enabledPlugins": {"<plugin>@<marketplace>": false}` in settings.json is therefore still briefed, even though Claude Code itself does NOT load its skills or offer them to the model.
+
+This is exactly the divergence the plugin exists to avoid: briefing injects a skill the harness would not, so an agent gets context that "cannot be there". A declaration pointing at a deliberately disabled plugin should fail (unknown skill), matching Claude Code.
+
+resolve_plugin_skill/claude_plugins (hooks/briefing-preload) iterate the installed_plugins.json entries and stop there. They must skip any plugin whose merged enabledPlugins value is false.
+
+Fix: read enabledPlugins from Claude Code's settings files with their real precedence (managed > project.local > project > user, verify against Claude Code behavior), key `<plugin>@<marketplace>`, and drop plugins set to false. Confirm the default for an installed-but-unlisted plugin (expected: enabled) so we do not regress plugins that were installed before the setting was written. Add tests: disabled plugin -> unknown; per-scope override (project re-enables a user-disabled plugin, and vice versa); unlisted plugin still resolves.
+
+Out of scope of #3, noted in CLAUDE.md as a known gap.
