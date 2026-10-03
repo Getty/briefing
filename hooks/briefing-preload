@@ -12,6 +12,10 @@
 #
 # Hard-fail policy: if any declared skill cannot be resolved, nothing
 # proceeds on a partial briefing.
+#
+# On Windows, Claude Code starts briefing-preload.exe (winlaunch) next to this
+# file, which picks a Python and runs this script:
+# winlaunch: run python {self}
 
 import glob
 import json
@@ -180,8 +184,17 @@ def _load_json(path):
 
 
 def _within(path, root):
-    path, root = os.path.normpath(path), os.path.normpath(root)
-    return path == root or path.startswith(root.rstrip("/") + "/")
+    # normcase: on Windows case and slash direction do not count, and
+    # normpath leaves backslashes there.
+    path = os.path.normcase(os.path.normpath(path))
+    root = os.path.normcase(os.path.normpath(root))
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+def user_home():
+    """$HOME, else the platform's idea of it: Claude Code on Windows without
+    Git Bash starts hooks with no HOME at all."""
+    return os.environ.get("HOME") or os.path.expanduser("~")
 
 
 def enabled_plugins(cwd, home):
@@ -682,7 +695,7 @@ def main_codex(data):
         return 0
 
     cwd = data.get("cwd") or os.environ.get("PWD") or "."
-    home = os.environ.get("HOME") or ""
+    home = user_home()
 
     agent_file, text = find_codex_agent(agent_type, cwd, home)
     if not agent_file:
@@ -737,7 +750,7 @@ def main_claude(data):
         return 0
 
     cwd = data.get("cwd") or os.environ.get("PWD") or "."
-    home = os.environ.get("HOME") or ""
+    home = user_home()
 
     agent_file = find_claude_agent(subagent, cwd, home)
     if not agent_file:
@@ -815,8 +828,9 @@ def problems(b):
 
 def harness_of(data):
     """Which harness sent this SessionStart — by where it keeps transcripts."""
-    tp = data.get("transcript_path") or ""
-    codex_home = os.environ.get("CODEX_HOME")
+    # Forward slashes throughout: Windows reports C:\Users\...\.claude\...
+    tp = (data.get("transcript_path") or "").replace("\\", "/")
+    codex_home = (os.environ.get("CODEX_HOME") or "").replace("\\", "/")
     if "/.codex/" in tp or (codex_home and tp.startswith(codex_home.rstrip("/") + "/")):
         return ("codex",)
     if "/.claude/" in tp:
@@ -829,7 +843,7 @@ def main_session_start(data):
     if data.get("source") not in (None, "startup", "resume"):
         return 0
     cwd = data.get("cwd") or os.environ.get("PWD") or "."
-    home = os.environ.get("HOME") or ""
+    home = user_home()
 
     # Only what would fail at spawn time. An oversized briefing still works;
     # it shows in the doctor and in the spawn's own audit line, and repeating
@@ -865,7 +879,7 @@ def doctor(argv):
     args = ap.parse_args(argv)
 
     cwd = os.path.abspath(args.cwd)
-    home = os.environ.get("HOME") or ""
+    home = user_home()
     harnesses = HARNESSES if args.harness == "both" else (args.harness,)
     results = check(cwd, home, harnesses)
 

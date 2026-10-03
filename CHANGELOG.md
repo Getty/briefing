@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.3 — 2026-10-03
+
+- Windows: briefing runs without Git Bash. Each hook script has a small
+  `<name>.exe` next to it, which Claude Code starts on Windows and which runs
+  the script with the first working Python (`python3`, `python`, `py -3`;
+  the Microsoft Store stub is skipped), in UTF-8 mode. Linux and macOS start
+  the scripts as before.
+- Windows: skills from plugins resolve. The check that a skill lies inside its
+  plugin compared paths with `/` and never matched there.
+- `briefing-doctor` is a small script instead of a symlink, so it exists in a
+  Windows checkout and runs from PowerShell and cmd too.
+- With `HOME` unset, briefing uses the platform's home directory instead of
+  none.
+- `hooks.json` gained `"args": []` on every entry, so Codex asks to trust the
+  hooks once more.
+
 ## 0.5.2 — 2026-09-28
 
 - A `plugin:skill` — and a bare name that falls through to a plugin — resolves
