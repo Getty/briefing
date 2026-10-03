@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-preload"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-preload",
+            "args": []
           }
         ]
       }
@@ -17,6 +18,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-preload",
+            "args": [],
             "additionalContextLimit": 0
           }
         ]
@@ -27,11 +29,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-marketplace-notice"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-marketplace-notice",
+            "args": []
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-preload"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-preload",
+            "args": []
           }
         ]
       }

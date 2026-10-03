@@ -8,6 +8,10 @@
 # Stays silent whenever it has nothing to add — already installed from the
 # shared marketplace, loaded via --plugin-dir or a checkout, or the note has
 # already been shown once.
+#
+# On Windows, Claude Code starts briefing-marketplace-notice.exe (winlaunch)
+# next to this file, which picks a Python and runs this script:
+# winlaunch: run python {self}
 
 import json
 import os
@@ -46,7 +50,10 @@ def main():
     if current is None or current == MARKETPLACE:
         return
 
-    state = os.path.expanduser(STATE_FILE)
+    # $HOME first: expanduser ignores it on Windows, where Claude Code may
+    # start the hook with or without one.
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    state = os.path.join(home, STATE_FILE[2:])
     if os.path.exists(state):
         return
     try:

@@ -19,7 +19,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "briefing-preload"
-DOCTOR = REPO_ROOT / "bin" / "briefing-doctor"
+# On Windows the command is bin/briefing-doctor.exe (winlaunch); CreateProcess
+# would take the sh script itself if named without .exe.
+DOCTOR = REPO_ROOT / "bin" / ("briefing-doctor" + (".exe" if os.name == "nt" else ""))
 
 
 def write(path: Path, body: str):

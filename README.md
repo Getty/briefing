@@ -196,6 +196,12 @@ Both paths install the same plugin from the same repo and both keep receiving
 updates. If you installed the old way, a `SessionStart` hook mentions the shared
 marketplace once and then never again.
 
+**Windows**: needs Python 3 on `PATH` — `python3`, `python` or the `py`
+launcher; the Microsoft Store stub does not count. Git Bash is not needed. Each
+hook script has a small `.exe` next to it (`winlaunch/`), which Claude Code
+starts on Windows and which runs the script with that Python; it also makes
+`briefing-doctor` work from PowerShell and cmd.
+
 **Codex**, from the shared marketplace — the only route there:
 
 ```

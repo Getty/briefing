@@ -1,1 +1,6 @@
-../hooks/briefing-preload
+#!/bin/sh
+# briefing-doctor: the doctor of hooks/briefing-preload. A script rather than
+# a symlink, so a Windows checkout gets a file that works: Windows runs
+# briefing-doctor.exe (winlaunch), which reads the line below.
+# winlaunch: run python {root}/hooks/briefing-preload doctor
+exec python3 "$(dirname "$0")/../hooks/briefing-preload" doctor "$@"
