@@ -252,7 +252,7 @@ parser on 3.10, so both paths are exercised across the matrix.
 
 Working in both harnesses, verified end to end: a Codex subagent declaring
 `briefing` skills answered from skill content it was never told to read, while
-the identical agent without the declaration did not. See `CHANGELOG.md` and
+the identical agent without the declaration did not. See `Changes` and
 `TODO.md`.
 
 ## License

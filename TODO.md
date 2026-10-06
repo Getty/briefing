@@ -35,7 +35,7 @@ Live worklist. Tick as we go.
       Claude Code, and is listed in the shared catalog at Getty/marketplace,
       in both the Claude Code and the Codex manifest. Codex installs only
       from the shared catalog.
-- [x] `CHANGELOG.md` — keep the changelog honest.
+- [x] `Changes` — keep the changelog honest.
 - [x] LICENSE file (Artistic-2.0).
 - [x] CI: GitHub Actions workflow running `python3 -m unittest
       discover tests` on Python 3.10 + 3.11 + 3.12.
