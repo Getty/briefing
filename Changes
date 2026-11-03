@@ -1,6 +1,8 @@
 Revision history for briefing
 
 {{$NEXT}}
+  - The Claude Code plugin takes its version from the commit, so every push to
+    main reaches marketplace users with auto-update.
 
 0.5.3     2026-10-06 05:22:17Z
   - Windows: briefing runs without Git Bash. Each hook script has a small
