@@ -1,0 +1,51 @@
+---
+claimed_at: 2026-11-05T01:11:40Z
+claimed_by: briefing
+class: standard
+created: 2026-11-04T21:08:42Z
+id: 5
+priority: critical
+started: 2026-11-05T01:05:51Z
+status: review
+tags:
+- claude-code
+- auto-mode
+- hooks
+title: 'Claude Code: Skills über SubagentStart/additionalContext einspielen statt
+  den Agent-Prompt in PreToolUse umzuschreiben (Auto-Modus lehnt sonst ab)'
+updated: 2026-11-05T01:11:40Z
+---
+
+Gemeldet von cai-admin (agent-lab, 2026-11-04), Claude Code 2.1.318, briefing ab20b71 (Getty/marketplace = Getty/briefing main).
+
+Befund: In Sitzungen mit --permission-mode auto lehnt Claude Code jeden Agent-Start ab, sobald briefing den Aufruf umschreibt. Wortlaut: „The server-side auto mode classifier gave no verdict for Agent: a hook changed this call's input after auto mode reviewed it“. Eine Freigabe Agent(<name>) in settings.local.json hilft nicht. Reproduziert in ~/langertha-holmgang (holmgang-worker) und ~/langertha (langertha-llm-advisor); die Hausregeln dort verbieten zu Recht den Ausweich auf unbriefte Agenten, die Sitzungen bleiben stehen. In default/acceptEdits/bypassPermissions tritt es nicht auf.
+Ursache: Claude-Code-Pfad = PreToolUse(matcher Agent) mit hookSpecificOutput.updatedInput (neuer prompt). Der Auto-Modus prüft vor den Hooks und verwirft Aufrufe, deren Eingabe danach verändert wurde.
+
+Ziel:
+1. Prüfen (und im CLAUDE.md festhalten), ob Claude Code 2.1.3xx SubagentStart feuert und hookSpecificOutput.additionalContext in den Kontext des Subagenten übernimmt (Kontrolltest mit Marker wie beim Codex-Pfad; Grenze additionalContextLimit 0 beachten). Die bisherige Notiz „Claude Code ignores SubagentStart“ ist ggf. veraltet.
+2. Wenn ja: Injektion für Claude Code auf SubagentStart/additionalContext umstellen (gleiche Briefing-Klasse, gleiches Resolve). Der PreToolUse-Hook bleibt NUR als Wächter: unbekannter Skill → permissionDecision deny (ein deny ändert die Eingabe nicht und ist mit dem Auto-Modus verträglich); sonst Exit 0 ohne updatedInput. Damit sieht der Auto-Modus genau den Aufruf, der läuft.
+3. Wenn SubagentStart in Claude Code die Agent-Datei nicht eindeutig liefert (agent_type), Zuordnung über agent_type → .claude/agents/<name>.md (inkl. .local.<name>.md von skilletor) wie heute.
+4. Rückfall: Kann Claude Code kein additionalContext bei SubagentStart, dann wenigstens im Auto-Modus (permission_mode im Hook-Input, falls vorhanden) klar mit systemMessage melden, statt still zu scheitern, und im README dokumentieren, dass Auto-Modus und briefing sich ausschließen.
+5. Tests: Claude-Code-Pfad mit SubagentStart-Eingabe, deny bei fehlendem Skill über PreToolUse ohne updatedInput, kein updatedInput mehr im Erfolgsfall; Changes-Eintrag.
+Fertig, wenn: in einer Sitzung mit --permission-mode auto ein briefing-Agent startet und seine Skills im Kontext hat (Verhaltensprobe: beantwortet eine Frage, die nur im Skill steht, ohne Skill-Tool), und ein Agent mit unbekanntem Skill weiter abgelehnt wird.
+
+
+--- Bericht briefing (k5), Commit 25c922a (25c922ac0b7e821e2d885bfa17b98b7df16cbc2b), Branch worktree-k5-subagentstart, nicht gepusht ---
+
+Erledigt:
+1. Claude Code 2.1.318 feuert SubagentStart (agent_type = name aus dem Frontmatter, transcript_path unter ~/.claude/, prompt_id, kein permission_mode) und übernimmt hookSpecificOutput.additionalContext in den Subagenten-Kontext. Rohprobe mit Logger-Hook: Agent nannte das Codewort, das nur im additionalContext stand. Steht in CLAUDE.md.
+2. Injektion für Claude Code läuft jetzt über SubagentStart/additionalContext (gleiche Briefing-Klasse, gleiches Resolve). PreToolUse(Agent) ist nur noch Wächter: unbekannter Skill → deny, sonst Exit 0 ohne Ausgabe, nie updatedInput. Fehlt ein Skill erst beim SubagentStart, bekommt der Agent die Abbruch-Anweisung wie unter Codex.
+3. Zuordnung agent_type → .claude/agents/**/*.md per name (inkl. .local.<name>.md von skilletor), wie bisher. Harness-Erkennung bei SubagentStart: transcript_path, dann turn_id (Codex), dann wer den Agenten hat.
+4. Rückfall nicht nötig, da 2.1.318 additionalContext übernimmt. README sagt, dass ältere Versionen ohne das unbrieft starten.
+5. Tests: 105/105 grün (python3 -m unittest discover tests), neu sind SubagentStart-Payload, Wächter still bei Erfolg, deny ohne updatedInput, Abbruch-Kontext, Harness-Wahl, .local-Agent, additionalContextLimit 0. Changes unter {{$NEXT}}, README, CLAUDE.md, SKILL.md und Manifeste angepasst.
+
+Verifiziert (claude -p --permission-mode auto --plugin-dir <Checkout>, briefing@getty per --settings abgeschaltet, Temp-Projekt mit eigenen Agents und Skill):
+- briefed → OKAPI-LANTERN-9083 (nur im Skill-Body). Einziger Tool-Call: SubagentHandback, kein Skill, kein Read. Agent-Prompt kam unverändert an.
+- control (gleicher Agent ohne Deklaration) → UNKNOWN
+- broken (unknown skill) → abgelehnt: "PreToolUse:Agent hook error: briefing: agent 'broken' references unknown skill(s): no-such-skill"
+Kosten der Proben zusammen ca. 0,50 USD.
+
+Offen:
+- Die gemeldete Ablehnung ließ sich headless NICHT nachstellen: Der alte Stand (ab20b71) wurde unter claude -p --permission-mode auto ebenfalls nicht abgelehnt. Der Fix wirkt per Konstruktion (kein updatedInput mehr), sollte aber einmal interaktiv in ~/langertha-holmgang oder ~/langertha bestätigt werden.
+- Die Audit-systemMessage von SubagentStart zeigt Claude Code in -p nicht an (die alte von PreToolUse schon). Ob sie in der TUI erscheint, ist ungeprüft.
+- Merge/Push/Release liegen bei dir. Der Commit liegt nur lokal auf worktree-k5-subagentstart.
