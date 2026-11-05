@@ -84,10 +84,26 @@ class BriefingHookTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def _payload(self, **overrides):
+        """SubagentStart as Claude Code 2.1.318 sends it — the briefing."""
+        return {
+            "session_id": "s1",
+            "transcript_path": str(self.home / ".claude/projects/p/s1.jsonl"),
+            "cwd": str(self.cwd),
+            "prompt_id": "p1",
+            "agent_id": "a1",
+            "agent_type": "demo",
+            "hook_event_name": "SubagentStart",
+            **overrides,
+        }
+
+    def _guard_payload(self, **overrides):
+        """PreToolUse on the Agent tool — the guard."""
         ti = {"subagent_type": "demo", "prompt": "ORIGINAL"}
         ti.update(overrides.pop("tool_input", {}))
         return {
+            "hook_event_name": "PreToolUse",
             "tool_name": "Agent",
+            "permission_mode": "auto",
             "cwd": str(self.cwd),
             "tool_input": ti,
             **overrides,
@@ -99,10 +115,10 @@ class BriefingHookTests(unittest.TestCase):
               f"---\nbriefing:\n  skills:{items}\n---\nbody\n")
 
     def _briefed(self):
-        """The rewritten prompt, or None if the spawn was not briefed."""
+        """The injected context, or None if the spawn was not briefed."""
         proc = run_hook(self._payload(), fake_home=self.home)
-        hso = json.loads(proc.stdout)["hookSpecificOutput"]
-        return hso.get("updatedInput", {}).get("prompt")
+        ctx = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        return None if ctx.startswith("# Briefing — FAILED") else ctx
 
     # --- passthrough cases ----------------------------------------------
 
@@ -182,11 +198,11 @@ class BriefingHookTests(unittest.TestCase):
         proc = run_hook(self._payload(), fake_home=self.home)
         self.assertEqual(proc.returncode, 0)
         out = json.loads(proc.stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        prompt = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn('<skill name="foo"', prompt)
         self.assertIn('<skill name="bar"', prompt)
         self.assertIn('<skill name="baz"', prompt)
-        self.assertTrue(prompt.endswith("ORIGINAL"))
+        self.assertNotIn("ORIGINAL", prompt)
 
     def test_flow_list_parses(self):
         write(self.cwd / ".claude/agents/demo.md", """
@@ -201,7 +217,7 @@ class BriefingHookTests(unittest.TestCase):
         proc = run_hook(self._payload(), fake_home=self.home)
         self.assertEqual(proc.returncode, 0)
         out = json.loads(proc.stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        prompt = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn('<skill name="foo"', prompt)
         self.assertIn('<skill name="bar"', prompt)
         self.assertIn('<skill name="baz"', prompt)
@@ -222,7 +238,7 @@ class BriefingHookTests(unittest.TestCase):
         write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO BODY")
         proc = run_hook(self._payload(), fake_home=self.home)
         out = json.loads(proc.stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        prompt = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("FOO BODY", prompt)
 
     # --- resolution order ----------------------------------------------
@@ -241,7 +257,7 @@ class BriefingHookTests(unittest.TestCase):
         proc = run_hook(self._payload(), fake_home=self.home)
         self.assertEqual(proc.returncode, 0)
         out = json.loads(proc.stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        prompt = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("PROJECT FOO", prompt)
         self.assertNotIn("USER FOO", prompt)
 
@@ -392,7 +408,7 @@ class BriefingHookTests(unittest.TestCase):
             body
         """)
         write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO")
-        proc = run_hook(self._payload(), fake_home=self.home)
+        proc = run_hook(self._guard_payload(), fake_home=self.home)
         self.assertEqual(proc.returncode, 0)
         out = json.loads(proc.stdout)
         hso = out["hookSpecificOutput"]
@@ -420,7 +436,7 @@ class BriefingHookTests(unittest.TestCase):
         """)
         proc = run_hook(self._payload(), fake_home=self.home)
         out = json.loads(proc.stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        prompt = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("VISIBLE BODY", prompt)
         self.assertNotIn("secret-metadata", prompt)
 
@@ -438,7 +454,7 @@ class BriefingHookTests(unittest.TestCase):
         write(self.cwd / ".claude/skills/big/SKILL.md", "x" * (70 * 1024))
         proc = run_hook(self._payload(), fake_home=self.home)
         out = json.loads(proc.stdout)
-        self.assertIn("updatedInput", out["hookSpecificOutput"])
+        self.assertIn("x" * 1024, out["hookSpecificOutput"]["additionalContext"])
         self.assertIn("over 64 kB", out["systemMessage"])
         self.assertIn("over 64 kB", proc.stderr)
 
@@ -478,7 +494,7 @@ class BriefingHookTests(unittest.TestCase):
         """)
         write(self.cwd / ".claude/skills/inner/SKILL.md", "INNER BODY")
         out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        prompt = out["hookSpecificOutput"]["additionalContext"]
         self.assertEqual(prompt.count("OUTER BODY"), 1)
         self.assertNotIn("INNER BODY", prompt)
 
@@ -514,10 +530,9 @@ class BriefingHookTests(unittest.TestCase):
         """)
         write(self.cwd / ".claude/skills/foo/SKILL.md", "---\nname: foo\n---\nFOO BODY\n")
         out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        prompt = out["hookSpecificOutput"]["additionalContext"]
         self.assertRegex(prompt, r'<skill name="foo"[^>]*>\s*FOO BODY\s*</skill>')
         self.assertNotIn("## Skill:", prompt)
-        self.assertTrue(prompt.rstrip().endswith("ORIGINAL"))
 
     def test_skill_element_carries_its_directory_for_references(self):
         write(self.cwd / ".claude/agents/demo.md", """
@@ -531,7 +546,7 @@ class BriefingHookTests(unittest.TestCase):
         write(self.cwd / ".claude/skills/foo/SKILL.md", "See references/api.md.\n")
         write(self.cwd / ".claude/skills/foo/references/api.md", "API\n")
         out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
-        prompt = out["hookSpecificOutput"]["updatedInput"]["prompt"]
+        prompt = out["hookSpecificOutput"]["additionalContext"]
         skill_dir = os.path.abspath(self.cwd / ".claude/skills/foo")
         self.assertIn('<skill name="foo" dir="%s">' % skill_dir, prompt)
         self.assertIn("relative to", prompt)
@@ -551,7 +566,7 @@ class BriefingHookTests(unittest.TestCase):
         """)
         write(self.cwd / ".claude/skills/foo/SKILL.md", "BY NAME")
         out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
-        self.assertIn("BY NAME", out["hookSpecificOutput"]["updatedInput"]["prompt"])
+        self.assertIn("BY NAME", out["hookSpecificOutput"]["additionalContext"])
 
     def test_agent_found_in_subdirectory(self):
         write(self.cwd / ".claude/agents/team/demo.md", """
@@ -565,7 +580,7 @@ class BriefingHookTests(unittest.TestCase):
         """)
         write(self.cwd / ".claude/skills/foo/SKILL.md", "NESTED")
         out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
-        self.assertIn("NESTED", out["hookSpecificOutput"]["updatedInput"]["prompt"])
+        self.assertIn("NESTED", out["hookSpecificOutput"]["additionalContext"])
 
     def test_file_named_after_agent_but_named_otherwise_is_not_it(self):
         write(self.cwd / ".claude/agents/demo.md", """
@@ -580,6 +595,101 @@ class BriefingHookTests(unittest.TestCase):
         write(self.cwd / ".claude/skills/foo/SKILL.md", "WRONG")
         proc = run_hook(self._payload(), fake_home=self.home)
         self.assertEqual(proc.stdout, "")
+
+
+    # --- PreToolUse is only a guard ------------------------------------
+
+    def test_guard_never_rewrites_a_briefable_spawn(self):
+        # Auto mode reviews the Agent call before hooks run and refuses one
+        # whose input a hook changed, so the guard must stay silent.
+        self._declare("foo")
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO")
+        proc = run_hook(self._guard_payload(), fake_home=self.home)
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout, "")
+
+    def test_guard_deny_carries_no_updated_input(self):
+        self._declare("missing-one")
+        out = json.loads(run_hook(self._guard_payload(), fake_home=self.home).stdout)
+        hso = out["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "PreToolUse")
+        self.assertEqual(hso["permissionDecision"], "deny")
+        self.assertNotIn("updatedInput", hso)
+        self.assertNotIn("updatedInput", out)
+
+    def test_guard_ignores_an_agent_without_declaration(self):
+        write(self.cwd / ".claude/agents/demo.md", "---\nname: demo\n---\nbody\n")
+        proc = run_hook(self._guard_payload(), fake_home=self.home)
+        self.assertEqual(proc.stdout, "")
+
+    # --- SubagentStart in Claude Code ----------------------------------
+
+    def test_subagent_start_briefs_as_additional_context(self):
+        self._declare("foo")
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO BODY")
+        out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
+        hso = out["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "SubagentStart")
+        self.assertIn("FOO BODY", hso["additionalContext"])
+        self.assertIn("Skill tool", hso["additionalContext"])
+        self.assertTrue(out["systemMessage"].startswith("briefing: demo ← foo"))
+
+    def test_subagent_start_with_missing_skill_tells_the_agent_to_stop(self):
+        # Normally the guard has denied the spawn already; if the skill
+        # vanished in between, the agent must not run half-briefed.
+        self._declare("foo", "missing-one")
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO BODY")
+        out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("FAILED", ctx)
+        self.assertIn("missing-one", ctx)
+        self.assertNotIn("FOO BODY", ctx)
+        self.assertIn("missing-one", out["systemMessage"])
+
+    def test_claude_transcript_picks_the_claude_agent_over_a_codex_one(self):
+        self._declare("foo")
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "CLAUDE SIDE")
+        write(self.cwd / ".codex/agents/demo.toml",
+              'name = "demo"\n# briefing: skills = ["bar"]\n')
+        write(self.cwd / ".agents/skills/bar/SKILL.md", "CODEX SIDE")
+        prompt = self._briefed()
+        self.assertIn("CLAUDE SIDE", prompt)
+        self.assertNotIn("CODEX SIDE", prompt)
+
+    def test_payload_without_transcript_finds_the_claude_agent(self):
+        self._declare("foo")
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "FOO BODY")
+        payload = self._payload()
+        del payload["transcript_path"]
+        out = json.loads(run_hook(payload, fake_home=self.home).stdout)
+        self.assertIn("FOO BODY", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_skilletor_local_agent_is_found_by_agent_type(self):
+        write(self.cwd / ".claude/agents/.local.demo.md", """
+            ---
+            name: demo
+            briefing:
+              skills:
+                - foo
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/foo/SKILL.md", "LOCAL")
+        self.assertIn("LOCAL", self._briefed())
+        self.assertEqual(
+            run_hook(self._guard_payload(), fake_home=self.home).stdout, "")
+
+    def test_built_in_agent_type_is_noop(self):
+        proc = run_hook(self._payload(agent_type="general-purpose"),
+                        fake_home=self.home)
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout, "")
+
+    def test_hooks_json_lifts_the_context_limit_for_subagent_start(self):
+        hooks = json.loads((REPO_ROOT / "hooks/hooks.json").read_text())["hooks"]
+        entry = hooks["SubagentStart"][0]["hooks"][0]
+        self.assertEqual(entry["additionalContextLimit"], 0)
+        self.assertNotIn("matcher", hooks["SubagentStart"][0])
 
 
 if __name__ == "__main__":

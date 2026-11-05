@@ -132,7 +132,7 @@ the spawn to succeed.
 
 This is the biggest mistake when migrating existing agents.
 
-The skill bodies are **already in the prompt** by the time the agent
+The skill bodies are **already in the context** by the time the agent
 reads its first token. You do not need to — and should not — also
 write things like:
 
@@ -187,7 +187,7 @@ When converting an existing agent that uses prompt-stuffing:
 5. **Re-read the body cold.** If a sentence only made sense as a
    reminder to load something, cut it. The remaining body should
    describe what the agent *does*, not what it *has*.
-6. **Spawn the agent and check the resulting prompt** (e.g. via
+6. **Spawn the agent and check its context** (e.g. via its
    transcript) to confirm the skills are present and the body is
    clean.
 

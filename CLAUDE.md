@@ -21,9 +21,11 @@ injection channels. One script serves both.
 ## Two harnesses, one hook script
 
 `hooks/briefing-preload` branches on `hook_event_name` in the stdin payload:
-`SubagentStart` is Codex, `SessionStart` is the pre-flight check for either,
-anything else falls through to the Claude Code path keyed on
-`tool_name == "Agent"`. Called as `briefing-doctor` (the symlink in `bin/`) or
+`SubagentStart` briefs either harness, `SessionStart` is the pre-flight check
+for either, anything else falls through to the Claude Code guard keyed on
+`tool_name == "Agent"`. Both harnesses send `SubagentStart`; `spawn_harness`
+tells them apart by `transcript_path` (as the pre-flight does), then by Codex's
+`turn_id`, then by which harness has the agent. Called as `briefing-doctor` (the symlink in `bin/`) or
 with `doctor` as its first argument it is a CLI instead. Everything between
 reading the declaration and emitting the result is shared: the `Briefing` class
 resolves a declaration once, and the spawn paths, the pre-flight and the doctor
@@ -31,11 +33,19 @@ all read their verdict from it.
 
 | | Claude Code | Codex |
 |---|---|---|
-| Event | `PreToolUse`, matcher `Agent` | `SubagentStart` |
-| Agent file | `<cwd>/.claude/agents/<subagent_type>.md` | any `*.toml` under a layer's `agents/` whose `name` matches, or `[agents.<name>] config_file` |
+| Event | `SubagentStart`; `PreToolUse` on `Agent` as guard | `SubagentStart` |
+| Agent file | any `*.md` under `.claude/agents/` whose `name` is `agent_type` (`subagent_type` in the guard) | any `*.toml` under a layer's `agents/` whose `name` matches, or `[agents.<name>] config_file` |
 | Declaration | `briefing.skills` in YAML frontmatter | `# briefing: skills = [...]` TOML comment |
-| Output | `updatedInput` with a rewritten `prompt` | `additionalContext` |
-| Missing skill | `permissionDecision: deny` | abort instruction + `systemMessage` |
+| Output | `additionalContext`; the guard emits nothing | `additionalContext` |
+| Missing skill | guard: `permissionDecision: deny` | abort instruction + `systemMessage` |
+
+**The Claude Code guard must never change the call.** `--permission-mode auto`
+reviews a tool call before hooks run and refuses it if a hook changed its input
+afterwards — "a hook changed this call's input after auto mode reviewed it".
+Up to 0.5.x the Claude Code path rewrote the `prompt` via `updatedInput`, which
+made briefing and auto mode exclusive. Do not bring `updatedInput` back. If a
+skill vanishes between guard and `SubagentStart`, the Claude Code agent gets the
+same abort instruction as under Codex.
 
 **Codex cannot deny a spawn.** `continue: false` is parsed for compatibility and
 then ignored, so the hard-fail policy degrades to the nearest honest thing: the
@@ -82,7 +92,7 @@ shim the fallback would never be exercised on a modern interpreter.
 ```
 .claude-plugin/plugin.json   Claude Code manifest
 .codex-plugin/plugin.json    Codex manifest — same skills/ and hooks/, nothing copied
-hooks/hooks.json             one file, both worlds; Claude Code ignores SubagentStart
+hooks/hooks.json             one file, both worlds; SubagentStart serves both
 hooks/briefing-preload       the hook (Python 3, stdlib only, executable)
 hooks/briefing-marketplace-notice   SessionStart notice about the shared marketplace
 bin/briefing-doctor          symlink to the hook; Claude Code puts bin/ on PATH
@@ -102,17 +112,32 @@ gain.
 
 ## Hook contract
 
-**Claude Code — stdin:**
+**Claude Code, briefing — stdin** (2.1.318, observed; no `permission_mode`):
 
 ```json
 {
-  "cwd": "/abs/path", "tool_name": "Agent",
+  "hook_event_name": "SubagentStart", "cwd": "/abs/path",
+  "session_id": "...", "transcript_path": "/home/u/.claude/projects/.../x.jsonl",
+  "prompt_id": "...", "agent_id": "...", "agent_type": "my-agent"
+}
+```
+
+stdout: `hookSpecificOutput.additionalContext` plus the audit `systemMessage`,
+or nothing. `agent_type` is the agent's frontmatter `name`; built-in types such
+as `general-purpose` have no file and are a no-op.
+
+**Claude Code, guard — stdin:**
+
+```json
+{
+  "hook_event_name": "PreToolUse", "cwd": "/abs/path", "tool_name": "Agent",
+  "permission_mode": "auto",
   "tool_input": { "subagent_type": "...", "prompt": "...", "model": "sonnet" }
 }
 ```
 
-stdout: `hookSpecificOutput.updatedInput` with the rewritten prompt, or
-`permissionDecision: "deny"` with a reason, or nothing at all.
+stdout: `permissionDecision: "deny"` with a reason, or nothing at all — never
+`updatedInput`.
 
 **Codex — stdin:**
 
@@ -126,7 +151,7 @@ stdout: `hookSpecificOutput.updatedInput` with the rewritten prompt, or
 stdout: `hookSpecificOutput.additionalContext`, optionally alongside a top-level
 `systemMessage` for the human. No-op is exit 0 with empty stdout, same as always.
 
-Both spawn paths put a one-line audit into `systemMessage` on success
+The `SubagentStart` path puts a one-line audit into `systemMessage` on success
 (`briefing: agent ← a, b (N kB)`), plus any warnings on further lines. Skills
 are injected as `<skill name="..." dir="...">` elements, frontmatter stripped.
 `dir` is the skill's absolute directory: only `SKILL.md` is inlined, so without
@@ -262,6 +287,22 @@ Claude Code (`claude -p --plugin-dir` with the installed copy disabled via
 `name` in a subdirectory answered with the phrase without a tool call, the
 control answered `UNKNOWN`, and both the audit line and the pre-flight warning
 arrived as system messages.
+
+The move of Claude Code to `SubagentStart` (briefing k5) was verified on Claude Code
+2.1.318 with `claude -p --permission-mode auto --plugin-dir <checkout>` and the
+installed copy disabled. A raw probe hook first showed that Claude Code fires
+`SubagentStart` with `agent_type` = the agent's `name` and puts
+`additionalContext` (with `additionalContextLimit: 0`) into the subagent's
+context. Then, with briefing itself: the declaring agent answered with the phrase
+and its only tool call was the handback (no Skill, no Read); the identical
+agent without the declaration answered `UNKNOWN`; the agent declaring an
+unknown skill was refused with `PreToolUse:Agent hook error: briefing: agent
+'broken' references unknown skill(s): no-such-skill`. The agent's `prompt`
+arrived unchanged. Two things this run could *not* show: the old rewrite was
+not refused under `claude -p --permission-mode auto` either, so the reported
+refusal (interactive sessions) was not reproduced headless; and Claude Code
+does not surface a `SubagentStart` `systemMessage` in `-p` stream output, so
+whether the audit line reaches the TUI is unverified.
 
 The original implementation was verified like this: the declaring agent answered
 with the phrase, the identical non-declaring agent answered "unknown", and the

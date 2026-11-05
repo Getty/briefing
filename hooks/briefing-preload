@@ -3,8 +3,8 @@
 #
 # One script, three entry points:
 #
-#   PreToolUse on the Agent tool (Claude Code)  rewrite the prompt, or deny
-#   SubagentStart (Codex)                        additionalContext, or abort
+#   PreToolUse on the Agent tool (Claude Code)  deny an unbriefable spawn
+#   SubagentStart (both)                         additionalContext, or abort
 #   SessionStart (both)                          warn about broken declarations
 #
 # Run as `briefing-doctor` (or `briefing-preload doctor`) it checks every
@@ -688,8 +688,50 @@ BRIEFING_HEADER = (
 
 # ---- spawn time --------------------------------------------------------------
 
-def main_codex(data):
-    """SubagentStart — Codex cannot deny a spawn, so context is all we get."""
+ABORT_CONTEXT = (
+    "# Briefing — FAILED\n\n"
+    "The skills this agent declares could not be loaded: {names}.\n\n"
+    "You are NOT briefed for this task. Do NOT attempt it and do NOT\n"
+    "improvise a substitute. Report this exact failure to whoever\n"
+    "delegated to you, and stop.\n"
+)
+
+DONT = {
+    "claude": "do NOT call the Skill tool for any of these names",
+    "codex": "do NOT go looking for their SKILL.md files",
+}
+
+
+def spawn_harness(data, cwd, home):
+    """Which harness sent this SubagentStart.
+
+    Both send it. The transcript path tells them apart; without one, a
+    `turn_id` is Codex's, and otherwise whichever harness has the agent.
+    """
+    harnesses = harness_of(data)
+    if len(harnesses) == 1:
+        return harnesses[0]
+    if "turn_id" in data:
+        return "codex"
+    agent_type = data.get("agent_type") or ""
+    return "claude" if find_claude_agent(agent_type, cwd, home) else "codex"
+
+
+def spawn_briefing(harness, agent_type, cwd, home):
+    if harness == "claude":
+        path = find_claude_agent(agent_type, cwd, home)
+        return claude_briefing(agent_type, path, cwd, home) if path else None
+    path, text = find_codex_agent(agent_type, cwd, home)
+    return codex_briefing(agent_type, path, text, cwd, home) if path else None
+
+
+def main_subagent_start(data):
+    """SubagentStart — inject the skills as additionalContext.
+
+    Both harnesses brief here. Neither can deny a spawn at this point, so a
+    missing skill becomes an instruction to stop; Claude Code has normally
+    refused the spawn already, in main_claude_guard.
+    """
     agent_type = data.get("agent_type") or ""
     if not agent_type:
         return 0
@@ -697,31 +739,21 @@ def main_codex(data):
     cwd = data.get("cwd") or os.environ.get("PWD") or "."
     home = user_home()
 
-    agent_file, text = find_codex_agent(agent_type, cwd, home)
-    if not agent_file:
-        return 0
-
-    b = codex_briefing(agent_type, agent_file, text, cwd, home)
+    harness = spawn_harness(data, cwd, home)
+    b = spawn_briefing(harness, agent_type, cwd, home)
     if b is None:
         return 0
 
     notes = [b.legacy_note()] if b.legacy else []
 
     if b.missing:
-        names = ", ".join(b.missing)
         msg = b.missing_note()
         sys.stderr.write(msg + "\n")
         sys.stdout.write(json.dumps({
             "systemMessage": "\n".join([msg] + notes),
             "hookSpecificOutput": {
                 "hookEventName": "SubagentStart",
-                "additionalContext": (
-                    "# Briefing — FAILED\n\n"
-                    f"The skills this agent declares could not be loaded: {names}.\n\n"
-                    "You are NOT briefed for this task. Do NOT attempt it and do NOT\n"
-                    "improvise a substitute. Report this exact failure to whoever\n"
-                    "delegated to you, and stop.\n"
-                ),
+                "additionalContext": ABORT_CONTEXT.format(names=", ".join(b.missing)),
             },
         }))
         return 0
@@ -731,7 +763,7 @@ def main_codex(data):
     if notes:
         sys.stderr.write("\n".join(notes) + "\n")
 
-    header = BRIEFING_HEADER.format(dont="do NOT go looking for their SKILL.md files")
+    header = BRIEFING_HEADER.format(dont=DONT[harness])
     sys.stdout.write(json.dumps({
         "systemMessage": "\n".join([b.audit_line()] + notes),
         "hookSpecificOutput": {
@@ -742,8 +774,12 @@ def main_codex(data):
     return 0
 
 
-def main_claude(data):
-    """PreToolUse on the Agent tool — rewrite the prompt, or deny the spawn."""
+def main_claude_guard(data):
+    """PreToolUse on the Agent tool — deny a spawn that cannot be briefed.
+
+    The input is never changed: auto mode reviews the call before hooks run
+    and refuses one a hook rewrote. The skills arrive at SubagentStart.
+    """
     ti = data.get("tool_input") or {}
     subagent = ti.get("subagent_type") or ""
     if not subagent:
@@ -757,36 +793,17 @@ def main_claude(data):
         return 0
 
     b = claude_briefing(subagent, agent_file, cwd, home)
-    if b is None:
+    if b is None or not b.missing:
         return 0
 
-    if b.missing:
-        msg = b.missing_note()
-        sys.stderr.write(msg + "\n")
-        sys.stdout.write(json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": msg,
-            }
-        }))
-        return 0
-
-    notes = []
-    if b.oversized:
-        notes.append(b.size_note())
-        sys.stderr.write(b.size_note() + "\n")
-
-    header = BRIEFING_HEADER.format(dont="do NOT call the Skill tool for any of these names")
-    ti["prompt"] = (
-        header + b.text + "\n\n---\n\n# Original task\n\n" + (ti.get("prompt") or "")
-    )
+    msg = b.missing_note()
+    sys.stderr.write(msg + "\n")
     sys.stdout.write(json.dumps({
-        "systemMessage": "\n".join([b.audit_line()] + notes),
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "updatedInput": ti,
-        },
+            "permissionDecision": "deny",
+            "permissionDecisionReason": msg,
+        }
     }))
     return 0
 
@@ -925,11 +942,11 @@ def main():
 
     event = data.get("hook_event_name")
     if event == "SubagentStart":
-        return main_codex(data)
+        return main_subagent_start(data)
     if event == "SessionStart":
         return main_session_start(data)
     if data.get("tool_name") == "Agent":
-        return main_claude(data)
+        return main_claude_guard(data)
     return 0
 
 

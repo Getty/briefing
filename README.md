@@ -50,16 +50,28 @@ found, nothing proceeds on a partial briefing.
 
 | | Claude Code | Codex |
 |---|---|---|
-| Hook event | `PreToolUse` on the `Agent` tool | `SubagentStart` |
+| Hook event | `SubagentStart`, plus `PreToolUse` on `Agent` as a guard | `SubagentStart` |
 | Agent definition | `.claude/agents/*.md`, by `name` | `.codex/agents/*.toml`, by `name` |
 | Declaration | `briefing.skills` in frontmatter | `# briefing: skills = [...]` comment |
-| Injection | rewrites the agent's prompt | `additionalContext` |
+| Injection | `additionalContext` | `additionalContext` |
 | Missing skill | spawn is **denied** | agent starts, told to abort |
 
 The last row is not a choice. A `SubagentStart` hook cannot stop a spawn — Codex
 parses `continue: false` for compatibility but ignores it. So under Codex the
 nearest honest equivalent is an agent that starts and refuses: instead of skills
 it receives an instruction not to attempt the task and to report the failure.
+Claude Code has a second chance before the spawn: a `PreToolUse` hook on the
+`Agent` tool checks the declaration and denies the call if a skill is missing.
+It never changes the call — the skills arrive at `SubagentStart`.
+
+That is what makes briefing work under `--permission-mode auto`. Auto mode
+reviews a tool call *before* hooks run and refuses one whose input a hook
+changed afterwards (*"a hook changed this call's input after auto mode reviewed
+it"*). Up to 0.5.x briefing rewrote the agent's prompt in `PreToolUse`, so in
+auto mode every briefed spawn could be refused. Now the call auto mode reviews
+is the call that runs; a deny changes nothing and is allowed. This needs a
+Claude Code whose `SubagentStart` hooks can add context — 2.1.318 does; older
+versions start the agent unbriefed, without an error.
 
 Each skill arrives wrapped in its own element, so the agent can tell where one
 ends and the next begins:
@@ -75,7 +87,9 @@ and load on demand, as they do natively — `dir` tells the agent where they are
 
 Every successful briefing leaves one line for you, not for the model:
 `briefing: my-agent ← getty-perl-core, superpowers:brainstorming (14 kB)`. Above
-64 kB of skill text a second line says so — the spawn still goes ahead.
+64 kB of skill text a second line says so — the spawn still goes ahead. Codex
+shows it in the TUI; Claude Code 2.1.318 does not show a `SubagentStart`
+message in `claude -p` output at all.
 
 ## Checking before anything spawns
 
