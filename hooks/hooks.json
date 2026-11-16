@@ -6,8 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-preload",
-            "args": []
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/briefing",
+            "args": ["hook", "pre-tool-use"]
           }
         ]
       }
@@ -17,8 +17,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-preload",
-            "args": [],
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/briefing",
+            "args": ["hook", "subagent-start"],
             "additionalContextLimit": 0
           }
         ]
@@ -34,8 +34,9 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-preload",
-            "args": []
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/briefing",
+            "args": ["hook", "session-start"],
+            "timeout": 90
           }
         ]
       }

@@ -9,5 +9,5 @@
   "homepage": "https://github.com/Getty/briefing",
   "license": "Artistic-2.0",
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json"
+  "hooks": "./hooks/codex-hooks.json"
 }
