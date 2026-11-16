@@ -129,6 +129,7 @@ sub _trim {
 sub _split_frontmatter {
   my ( $self, $text ) = @_;
   $text = '' unless defined $text;
+  $text =~ s/\A(?:\x{FEFF}|\xEF\xBB\xBF)//;
   return ( $1, $2 )
     if $text =~ /\A---\r?\n(.*?)\r?\n---\r?\n(.*)\z/s;
   return ( '', $text );

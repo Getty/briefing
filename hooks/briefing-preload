@@ -48,6 +48,9 @@ _FM_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n(.*)\Z", re.DOTALL)
 
 
 def split_frontmatter(text):
+    # A UTF-8 byte order mark (some editors write one) would hide the leading "---".
+    if text.startswith("\ufeff"):
+        text = text[1:]
     m = _FM_RE.match(text)
     if m:
         return m.group(1), m.group(2)

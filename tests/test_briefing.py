@@ -144,6 +144,21 @@ class BriefingHookTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout, "")
 
+    def test_bom_before_frontmatter_still_briefs(self):
+        """An agent file saved with a UTF-8 BOM is read like one without.
+
+        Runs the reference Python hook (and the Perl CLI under BRIEFING_TEST_CLI):
+        the BOM must not hide the opening "---" and so silently unbrief the spawn.
+        """
+        write(self.home / ".claude/skills/s/SKILL.md", "BOM-MARKER\n")
+        path = self.cwd / ".claude/agents/demo.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\xef\xbb\xbf"
+                         + b"---\nbriefing:\n  skills:\n    - s\n---\nbody\n")
+        ctx = self._briefed()
+        self.assertIsNotNone(ctx)
+        self.assertIn("BOM-MARKER", ctx)
+
     def test_agent_without_briefing_block_is_noop(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
