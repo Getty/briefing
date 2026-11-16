@@ -14,6 +14,8 @@ vollständig in den Kontext. Nutzung und Installation: [README.md](README.md).
   [.claude/rules/briefing-rules.md](.claude/rules/briefing-rules.md).
 - **Agenten für Plugin-Nutzer verfassen:**
   [Produkt-Skill](skills/briefing/SKILL.md); nicht mit dem Entwicklungs-Skill verwechseln.
+- **Perl-Port oder Auslieferung planen:**
+  [App::Briefing-Zielrichtung](docs/perl-direction.md) und die dort verlinkte Packaging-Probe lesen.
 
 ## Das Agententeam
 

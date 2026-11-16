@@ -19,8 +19,12 @@ nicht die Nutzung des Plugins. Produktüberblick: `README.md` im Repository-Root
   Der Doctor ist eine CLI: fehlgeschlagene Prüfungen liefern Exit 1.
 - Eine Deklaration wird durch `Briefing` einmal aufgelöst; Spawn, Pre-flight
   und Doctor verwenden dasselbe Ergebnis, keine getrennten Resolver.
-- Fehlende Skills ergeben niemals ein Teil-Briefing. Codex kann den Spawn
-  nicht sperren: ausschließlich Abbruchanweisung statt der verfügbaren Skills.
+- Beide Harnesses injizieren bei `SubagentStart` über `additionalContext`.
+  Claude Codes `PreToolUse` ist nur Guard: `deny` oder leer, niemals `updatedInput`
+  oder Prompt-Rewrite; sonst kann auto-mode den veränderten Aufruf verweigern.
+- Fehlende Skills ergeben niemals ein Teil-Briefing. Bei `SubagentStart` kann
+  keiner der Harnesses den Spawn sperren: nur Abbruchanweisung, auch wenn ein
+  Skill erst nach dem Claude-Code-Guard verschwindet.
 - Nur `SKILL.md` wird injiziert, Frontmatter entfernt. Das absolute `dir` am
   `<skill>`-Element macht `references/` und `scripts/` auffindbar; diese nicht mitladen.
 - Ein `hooks/hooks.json` bedient beide Harnesses. Codex benötigt
@@ -38,9 +42,9 @@ nicht die Nutzung des Plugins. Produktüberblick: `README.md` im Repository-Root
 | Agenten finden, Deklarationen parsen, Skills oder Plugins auflösen | [Auflösung](references/resolution.md) |
 | Harness-Integration beweisen oder „briefing tut nichts“ untersuchen | [Live-Verifikation](references/live-verification.md) |
 
-Der Vertrag dieses Checkouts steht in `hooks/hooks.json` und `hooks/briefing-preload`:
-Claude Code injiziert hier über `PreToolUse.updatedInput`. Ein installierter neuerer
-Plugin-Stand oder ein allgemeines Agenten-Preset ist kein Beleg für diesen Checkout.
+Den wirksamen Vertrag an `hooks/hooks.json` und `hooks/briefing-preload` der
+wirklich geladenen Version prüfen: Checkout, installierte Cache-Kopie und
+Harness-Version können auseinanderliegen. Legacyharness-Falle: [Hook-Vertrag](references/hook-contract.md).
 
 ## Prüfungen
 
