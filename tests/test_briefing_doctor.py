@@ -17,6 +17,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from cli_driver import command_for
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "briefing-preload"
 # On Windows the command is bin/briefing-doctor.exe (winlaunch); CreateProcess
@@ -44,6 +46,7 @@ class Sandbox(unittest.TestCase):
     def env(self):
         env = {k: v for k, v in os.environ.items() if k != "CODEX_HOME"}
         env["HOME"] = str(self.home)
+        env["PYTHONIOENCODING"] = "utf-8"
         return env
 
     def claude_agent(self, name, skills, file_name=None):
@@ -66,8 +69,14 @@ class Sandbox(unittest.TestCase):
 class DoctorTests(Sandbox):
     def doctor(self, *args):
         return subprocess.run(
-            [str(DOCTOR), "--cwd", str(self.cwd), *args],
-            capture_output=True, text=True, env=self.env(), timeout=10,
+            command_for(
+                "doctor", [str(DOCTOR)], "--cwd", str(self.cwd), *args
+            ),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=self.env(),
+            timeout=10,
         )
 
     def test_healthy_agents_exit_zero_and_are_listed(self):
@@ -144,8 +153,14 @@ class DoctorTests(Sandbox):
         self.claude_agent("reviewer", ["gone"])
 
         proc = subprocess.run(
-            ["python3", str(HOOK), "doctor", "--cwd", str(self.cwd)],
-            capture_output=True, text=True, env=self.env(), timeout=10,
+            command_for(
+                "doctor", ["python3", str(HOOK), "doctor"], "--cwd", str(self.cwd)
+            ),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=self.env(),
+            timeout=10,
         )
 
         self.assertEqual(proc.returncode, 1)
@@ -162,9 +177,13 @@ class PreflightTests(Sandbox):
             "transcript_path": transcript_path,
         }
         return subprocess.run(
-            ["python3", str(HOOK)],
+            command_for("hook", ["python3", str(HOOK)]),
             input=json.dumps(payload),
-            capture_output=True, text=True, env=self.env(), timeout=10,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=self.env(),
+            timeout=10,
         )
 
     def test_broken_agent_is_reported_at_session_start(self):

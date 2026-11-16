@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Nur Diagnose: identische Dateizugriffe ungepackt und paketiert vergleichen."""
+"""Diagnostic only: compare identical file access unpacked and packaged."""
 import argparse
 import json
 import os
@@ -21,19 +21,19 @@ def main():
     args = parser.parse_args()
     perl = shutil.which(args.perl)
     if not perl:
-        parser.error("Buildinterpreter nicht gefunden: " + args.perl)
+        parser.error("Build interpreter not found: " + args.perl)
     perl = str(Path(perl).resolve(strict=True))
     binary = args.binary.resolve(strict=True)
     source = args.source.resolve(strict=True)
     if not binary.is_file() or not source.is_file():
-        parser.error("Binary und Quelle müssen Dateien sein")
+        parser.error("Binary and source must be files")
     scratch = ROOT / ".work"
     if not str(scratch).isascii():
-        parser.error("Diagnose benötigt einen ASCII-Pfad zum Prototyp-Verzeichnis")
+        parser.error("Diagnostics require an ASCII path to the prototype directory")
     scratch.mkdir(exist_ok=True)
     report = {
         "diagnostic_only": True,
-        "note": "Separate Pfadkontrollen; ersetzen weder den Smoke noch dessen Fehlerstatus.",
+        "note": "Separate path controls; they replace neither the smoke test nor its failure status.",
         "host": {"os": platform.system(), "release": platform.release(),
                  "architecture": platform.machine()},
         "environment_difference": {
@@ -66,7 +66,7 @@ def main():
                     if key in os.environ:
                         env[key] = os.environ[key]
                 if mode == "source":
-                    # Nur die Quelle benötigt den Buildinterpreter und dessen Abhängigkeiten.
+                    # Only the source requires the build interpreter and its dependencies.
                     env["PATH"] = os.environ.get("PATH", "")
                     if "PERL5LIB" in os.environ:
                         env["PERL5LIB"] = os.environ["PERL5LIB"]
@@ -85,7 +85,7 @@ def main():
                     "stderr": result.stderr.decode("utf-8", errors="replace"),
                     "stdout_hex": result.stdout.hex(), "stderr_hex": result.stderr.hex(),
                 })
-    # Kontrollfehler sind Befunde, keine Infrastrukturfehler; Letztere werden nicht abgefangen.
+    # Control failures are findings, not infrastructure failures; the latter are not caught.
     report["diagnostic_status"] = "completed"
     text = json.dumps(report, indent=2, ensure_ascii=True) + "\n"
     args.report.parent.mkdir(parents=True, exist_ok=True)

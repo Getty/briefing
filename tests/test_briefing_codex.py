@@ -17,6 +17,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from cli_driver import command_for
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "briefing-preload"
 
@@ -24,12 +26,14 @@ HOOK = REPO_ROOT / "hooks" / "briefing-preload"
 def run_hook(payload, *, fake_home, extra_env=None):
     env = {k: v for k, v in os.environ.items() if k != "CODEX_HOME"}
     env["HOME"] = str(fake_home)
+    env["PYTHONIOENCODING"] = "utf-8"
     env.update(extra_env or {})
     proc = subprocess.run(
-        ["python3", str(HOOK)],
+        command_for("hook", ["python3", str(HOOK)]),
         input=json.dumps(payload),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         timeout=10,
     )
@@ -453,6 +457,9 @@ class CodexHookTests(unittest.TestCase):
         self.assertNotIn("DISCOVERED", ctx)
 
     def test_declared_role_is_found_without_tomllib(self):
+        # The default Python driver proves its tomllib fallback. A configured
+        # Perl CLI ignores this Python-only shim; that run verifies only the
+        # equivalent declared-role semantics.
         shim = self.root / "notoml"
         write(shim / "tomllib.py", "raise ImportError('blocked for test')\n")
         write(self.cwd / ".codex/config.toml", """
@@ -536,9 +543,12 @@ class CodexHookTests(unittest.TestCase):
 
         self.assertIn("BUNDLED", ctx)
 
-    # --- the tomllib-less interpreter (CI still runs Python 3.10) ---------
+    # --- Python tomllib fallback and cross-driver TOML semantics ---------
 
     def test_comment_declaration_is_parsed_without_tomllib(self):
+        # The default Python driver proves its import fallback. With
+        # BRIEFING_TEST_CLI, PYTHONPATH cannot prove a Perl import behavior;
+        # it only keeps this comment-declaration fixture semantic coverage.
         shim = self.root / "notoml"
         write(shim / "tomllib.py", "raise ImportError('blocked for test')\n")
         self._agent('''
@@ -551,11 +561,20 @@ class CodexHookTests(unittest.TestCase):
         self._skill("double", "DOUBLE OK\n")
         self._skill("single", "SINGLE OK\n")
 
-        env = {**os.environ, "HOME": str(self.home), "PYTHONPATH": str(shim)}
+        env = {
+            **os.environ,
+            "HOME": str(self.home),
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONPATH": str(shim),
+        }
         proc = subprocess.run(
-            ["python3", str(HOOK)],
+            command_for("hook", ["python3", str(HOOK)]),
             input=json.dumps(self._payload()),
-            capture_output=True, text=True, env=env, timeout=10,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=10,
         )
 
         ctx = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
@@ -564,6 +583,8 @@ class CodexHookTests(unittest.TestCase):
         self.assertNotIn("must-not-be-read", ctx)
 
     def test_legacy_table_is_parsed_without_tomllib(self):
+        # See the comment-declaration case above: the shim proves the Python
+        # fallback only, while a configured Perl CLI covers these TOML inputs.
         shim = self.root / "notoml"
         write(shim / "tomllib.py", "raise ImportError('blocked for test')\n")
         self._agent("""
@@ -581,11 +602,20 @@ class CodexHookTests(unittest.TestCase):
         self._skill("multi-line", "MULTI OK\n")
         self._skill("single-quoted", "SINGLE OK\n")
 
-        env = {**os.environ, "HOME": str(self.home), "PYTHONPATH": str(shim)}
+        env = {
+            **os.environ,
+            "HOME": str(self.home),
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONPATH": str(shim),
+        }
         proc = subprocess.run(
-            ["python3", str(HOOK)],
+            command_for("hook", ["python3", str(HOOK)]),
             input=json.dumps(self._payload()),
-            capture_output=True, text=True, env=env, timeout=10,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=10,
         )
 
         ctx = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]

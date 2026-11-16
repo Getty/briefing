@@ -1,4 +1,4 @@
-# Maschinenlokale Berechtigungen bleiben außerhalb der Projektkonfiguration.
+# Machine-local permissions are not project configuration.
 /settings.local.json
 
 # >>> skilletor >>>

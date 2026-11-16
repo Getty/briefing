@@ -120,6 +120,47 @@ carrying a `[briefing]` table — so it works in CI. Claude Code puts
 `briefing-doctor` on `PATH` for the agent; Codex plugins cannot, so there run
 `python3 <plugin root>/hooks/briefing-preload doctor`.
 
+## Source library and CLI
+
+The repository also contains the new reusable Perl implementation,
+`App::Briefing`, and its thin `briefing` command. This is a source distribution
+foundation, not a claim that `App-Briefing` is available from CPAN yet. From a
+checkout with its Perl dependencies installed, the command provides:
+
+```sh
+briefing hook                         # JSON hook payload on stdin
+briefing doctor --cwd . --harness both
+briefing notice
+briefing --help
+briefing --version
+```
+
+Library users can construct an explicit context and receive data rather than
+terminal output:
+
+```perl
+use App::Briefing;
+
+my $briefing = App::Briefing->new(
+  cwd        => $project,
+  home       => $home,
+  codex_home => $codex_home,
+);
+my $result = $briefing->brief_agent('reviewer', harness => 'claude');
+my $hook = $briefing->process_hook($payload);
+```
+
+`brief_agent`, `check_agents` and `process_hook` do not write files or print.
+`process_notice` is the deliberate exception for filesystem state: it preserves
+the existing one-time marketplace marker, while still returning output for the
+CLI to emit.
+
+The installed plugin launchers still use the Python hooks during this port.
+They are not switched to Perl or to standalone binaries until a separate,
+native verification and cutover. Accordingly, the current plugin instructions
+and Python requirement below remain in force. A source-installed `briefing`
+command itself never invokes Python.
+
 ## Declaring skills
 
 **Claude Code** — under a `briefing:` block in the agent's frontmatter:
@@ -253,14 +294,35 @@ proving the body was in its context before its first turn.
 
 ## Develop
 
+The source implementation uses project-local Perl dependencies:
+
+```sh
+export PERL5LIB="$PWD/.build-deps/lib/perl5${PERL5LIB:+:$PERL5LIB}"
+prove -lr t
+```
+
+For an explicit conformance run against the source command, set
+`BRIEFING_TEST_CLI` to a JSON argv array containing the absolute Perl path,
+`-I<checkout>/lib`, and `<checkout>/bin/briefing`, then run:
+
+```sh
+BRIEFING_TEST_CLI='["/usr/bin/perl","-I/absolute/checkout/lib","/absolute/checkout/bin/briefing"]' \
+  python3 -m unittest discover tests -v
+```
+
+The retained compatibility hook remains Python 3 standard-library-only and is
+checked independently:
+
 ```sh
 python3 -m py_compile hooks/briefing-preload
 python3 -m unittest discover tests -v
 ```
 
-Stdlib only, no dependencies. CI runs Python 3.10 / 3.11 / 3.12 — the Codex
-branch parses TOML with `tomllib` where it exists and falls back to a small regex
-parser on 3.10, so both paths are exercised across the matrix.
+The Perl core requires Perl 5.20 or newer plus the dependencies in `cpanfile`.
+On Windows it uses `Win32::LongPath` explicitly for Unicode and long paths; no
+global filesystem monkeypatch is installed. A Linux source test does not prove
+the native Windows or macOS build, and source parity does not by itself prove
+standalone binary delivery.
 
 ## Status
 

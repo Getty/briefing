@@ -1,170 +1,169 @@
-# Wegwerf-Prototyp für Perl-Packaging
+# Throwaway Perl packaging prototype
 
-Frage: Taugt die vorhandene native Perl/pp-Strecke für einen kleinen JSON-Hook
-ohne separat installierte Laufzeit?
+Question: Is the existing native Perl/pp path suitable for a small JSON hook
+without a separately installed runtime?
 
-**Kein Produktcode, keine Distribution, kein festgelegter Modulname. Das eigene
-Protokoll ist NICHT mit den echten Harness-Protokollen kompatibel.** Keine
-Agenten-/Skill-Auflösung, Frontmatter-Verarbeitung oder Hook-Integration;
-gelesen werden ausschließlich ausdrücklich übergebene Fixture-Dateien. Das
-Artefakt enthält eine Perl-Laufzeit, startet aber weder das Python des Testhosts
-noch ein separat installiertes Perl.
+**Not product code, not a distribution, and no fixed module name. Its own
+protocol is NOT compatible with real harness protocols.** There is no
+agent/skill resolution, frontmatter processing, or hook integration;
+it reads only explicitly supplied fixture files. The artifact contains a Perl
+runtime, but starts neither the test host's Python nor separately installed Perl.
 
-## Einzeiler
+## Commands
 
-Vom Repository-Root aus. Buildhost: Perl mit PAR::Packer 1.064 und Path::Tiny
-(lokal 0.150); Python 3.8+ nur für die Build-/Testhelfer. JSON::PP ist ausdrücklich
-Teil des Experiments; Path::Tiny folgt der Perl-Datei-I/O-Hausregel. Das
-skilletor-Buildvorbild liefert die pp-Strecke samt PAR_VERBATIM=1. Keine
-Modul-Ausdünnung oder Größenoptimierung.
+From the repository root. Build host: Perl with PAR::Packer 1.064 and Path::Tiny
+(local 0.150); Python 3.8+ only for the build/test helpers. JSON::PP is explicitly
+part of the experiment; Path::Tiny follows the Perl file-I/O house rule. The
+skilletor build model supplies the pp path with PAR_VERBATIM=1. No module pruning
+or size optimization.
 
-- Nativer Build pro OS: `python prototypes/perl-packaging/build.py`
+- Native build per OS: `python prototypes/perl-packaging/build.py`
 - Linux/macOS: `python prototypes/perl-packaging/smoke.py prototypes/perl-packaging/build/probe --expect-arch x86_64 --report prototypes/perl-packaging/build/smoke.json`
 - Windows: `python prototypes/perl-packaging/smoke.py prototypes/perl-packaging/build/probe.exe --expect-arch x86_64 --report prototypes/perl-packaging/build/smoke.json`
-- Metadaten des Artefakts: `prototypes/perl-packaging/build/probe --version` (Windows: `.exe` anhängen).
+- Artifact metadata: `prototypes/perl-packaging/build/probe --version` (append `.exe` on Windows).
 
-Lokal auf Linux heißt der Python-Aufruf `python3`. `build.py --perl /absoluter/perl`
-wählt den Buildinterpreter. Der Helfer protokolliert sein portables pp-Kommando:
-`perl -Mpp -e 'pp->go()' -- -o AUSGABE probe.pl`, mit PAR_VERBATIM=1 in der
-Umgebung. Der Helfer installiert keine globalen Abhängigkeiten.
+Locally, the Python command on Linux is `python3`. `build.py --perl /absolute/perl`
+selects the build interpreter. The helper records its portable pp command:
+`perl -Mpp -e 'pp->go()' -- -o OUTPUT probe.pl`, with PAR_VERBATIM=1 in the
+environment. The helper installs no global dependencies.
 
-Anfrage: `{"skills":[{"name":"beispiel","path":"/absoluter/Fixture SKILL.md"}]}`
+Request: `{"skills":[{"name":"example","path":"/absolute/Fixture SKILL.md"}]}`
 
-Erfolg: `{"ok":true,"skills":[{"name":"beispiel","body":"vollständige UTF-8-Datei"}]}`.
-Fehler: `{"ok":false,"error":{"code":"missing_skill","name":"beispiel"}}`.
-**Kein Fehler enthält Skill-Inhalte**, auch wenn vorherige Dateien schon gelesen
-wurden. Kaputtes JSON ergibt `invalid_json`, eine ungültige Anfrage
-`invalid_request`, eine nicht lesbare Datei `unreadable_skill`.
-Behandelte Anfragen liefern Exit 0 und genau ein UTF-8-JSON-Objekt. Das sind
-Prototyp-Semantiken, keine Aussage über das Verhalten echter Hooks.
+Success: `{"ok":true,"skills":[{"name":"example","body":"complete UTF-8 file"}]}`.
+Error: `{"ok":false,"error":{"code":"missing_skill","name":"example"}}`.
+**No error includes skill content**, even if earlier files were already read.
+Broken JSON yields `invalid_json`, an invalid request `invalid_request`, and an
+unreadable file `unreadable_skill`.
+Handled requests exit 0 and produce exactly one UTF-8 JSON object. These are
+prototype semantics, not a statement about the behavior of real hooks.
 
-## Prüfungen und Messgrenzen
+## Checks and measurement limits
 
-Der Python-Testhost erzeugt Unicode-Inhalte und Pfade mit Leerzeichen, Umlauten
-und Zeichen außerhalb Windows-1252 (`Pfad ä 技能`). Er kopiert das Artefakt in
-einen Pfad mit Leerzeichen/Umlaut und startet es über einen absoluten Pfad mit
-frischer Minimalumgebung und leerem PATH. Geprüft werden striktes JSON auf
-stdout, leeres stderr, vollständige Inhalte, vorhandene plus fehlende Skills
-und ungültige Eingaben. Der Anwendungscode startet kein externes Perl/Python.
+The Python test host creates Unicode content and paths with spaces, umlauts, and
+characters outside Windows-1252 (`Pfad ä 技能`). It copies the artifact into a
+path with spaces and an umlaut, and starts it through an absolute path with a
+fresh minimal environment and empty PATH. The checks cover strict JSON on
+stdout, empty stderr, complete content, present plus missing skills, and invalid
+input. The application code starts no external Perl or Python.
 
-Jeder Lauf bekommt ein neues Arbeitsverzeichnis unter `.work/`.
-**PAR_GLOBAL_TEMP** bestimmt den tatsächlichen **PAR_TEMP**-Cache: pp setzt
-ein übergebenes PAR_TEMP zurück; PAR_TEMP allein isoliert daher keinen Cache.
-Der Runner prüft, dass die gewählten Verzeichnisse tatsächlich gefüllt werden.
-Gemessen werden Erststart, fünf Wiederholungen mit demselben Cache und ein
-weiterer Start mit einem zweiten leeren Cache. Ein leerer PAR-Cache ist kein
-leerer OS-Seitencache. Das sind lokale Wandzeiten, kein belastbarer Benchmark.
+Each run receives a new working directory under `.work/`.
+**PAR_GLOBAL_TEMP** determines the actual **PAR_TEMP** cache: pp resets a passed
+PAR_TEMP, so PAR_TEMP alone does not isolate a cache.
+The runner checks that the selected directories are actually populated.
+It measures a cold start, five repeats with the same cache, and one additional
+start with a second empty cache. An empty PAR cache is not an empty OS page
+cache. These are local wall-clock times, not a reliable benchmark.
 
-Im JSON sind `functional_status` und `separate_interpreter_absence.status`
-getrennt. Letzteres bleibt beim normalen Host-Runner **NOT_PROVEN**: Ein leerer
-PATH versteckt weder absolute Interpreterpfade noch System-Perl-Bibliotheken
-oder macOS-System-Perl. Ein grüner Smoke-Test beweist deshalb keine Umgebung
-ohne externe Laufzeit. Die unten separat dokumentierte Linux-Isolation stammt
-aus der Hauptsitzung; dieser Runner erzeugt/startet keine Container.
+The JSON separates `functional_status` and `separate_interpreter_absence.status`.
+The latter remains **NOT_PROVEN** for the ordinary host runner: an empty PATH
+hides neither absolute interpreter paths nor system Perl libraries or macOS
+system Perl. A green smoke test therefore does not prove an environment without
+an external runtime. The separately documented Linux isolation below came from
+the main session; this runner does not create or start containers.
 
-Berichtet werden Host-OS/Architektur/libc, Architektur/Version des eingebetteten
-Perl, Artefakt- und Cachegröße sowie Systembibliotheken (Linux ldd, macOS otool,
-Windows objdump, sofern verfügbar). Diese Werkzeuge laufen auf dem Testhost mit
-dessen normalem PATH außerhalb der Zeitmessungen. Statische Bibliotheksanalyse
-ist kein vollständiger Laufzeit-Trace. pp kann optionale, auf dem Buildhost
-vorhandene Module einpacken; die Größe ist keine Reproduzierbarkeitsgarantie.
+The report includes host OS/architecture/libc, embedded Perl architecture/version,
+artifact and cache size, and system libraries (Linux ldd, macOS otool, Windows
+objdump, when available). These tools run on the test host with its normal PATH
+outside the timing measurements. Static library analysis is not a complete
+runtime trace. pp can package optional modules present on the build host; size
+is not a reproducibility guarantee.
 
-## Zielmatrix mit getrennten Statusfeldern
+## Target matrix with separate status fields
 
-| Ziel | Nativer CI-Runner | Tatsächlich getestet | Build / Funktions-Smoke | Ohne separates Perl |
+| Target | Native CI runner | Actually tested | Build / functional smoke | Without separate Perl |
 |---|---|---|---|---|
-| Linux | ubuntu-24.04, x86_64 | CI: glibc 2.39; lokal: glibc 2.41 | PASS / PASS | Separate lokale Isolation PASS, Details unten |
-| macOS | macos-15-intel, x86_64 | nativer Intel-Runner, Darwin 24.6 | PASS / PASS | NICHT BELEGT: Host-Test mit leerem PATH |
-| Windows | windows-2022, x86_64 / Strawberry Perl | nativer Windows-Server-2022-Runner | Build PASS; Smoke FAIL bei Unicode-Dateipfad | NICHT BELEGT |
+| Linux | ubuntu-24.04, x86_64 | CI: glibc 2.39; local: glibc 2.41 | PASS / PASS | Separate local isolation PASS, details below |
+| macOS | macos-15-intel, x86_64 | native Intel runner, Darwin 24.6 | PASS / PASS | NOT PROVEN: host test with empty PATH |
+| Windows | windows-2022, x86_64 / Strawberry Perl | native Windows Server 2022 runner | Build PASS; smoke FAIL on Unicode file path | NOT PROVEN |
 
-[Zweiter nativer Lauf](https://github.com/Getty/briefing/actions/runs/43799294737):
-Linux und macOS bestehen alle Smoke-Prüfungen; Windows baut und startet die EXE,
-meldet aber eine vorhandene Datei unter `Pfad ä 技能` als `missing_skill`.
-Die ergänzende [native Gegenprobe](https://github.com/Getty/briefing/actions/runs/43800137154)
-vergleicht ASCII-, Umlaut- und CJK-Pfade mit unverändertem Code:
+[Second native run](https://github.com/Getty/briefing/actions/runs/43799294737):
+Linux and macOS passed all smoke checks; Windows builds and starts the EXE,
+but reports an existing file below `Pfad ä 技能` as `missing_skill`.
+The additional [native control](https://github.com/Getty/briefing/actions/runs/43800137154)
+compares ASCII, umlaut, and CJK paths with unchanged code:
 
-| Windows-Dateipfad | Ungepacktes Skript | PAR-Binary |
+| Windows file path | Unpacked script | PAR binary |
 |---|---|---|
 | ASCII | PASS | PASS |
 | `Grüße` | FAIL: `missing_skill` | FAIL: `missing_skill` |
 | `技能` | FAIL: `missing_skill` | FAIL: `missing_skill` |
 
-Alle sechs Prozesse starten und liefern reines JSON mit Exit 0. Auf ASCII-Pfaden
-wird derselbe Unicode-Dateiinhalt korrekt gelesen. Die Dateien existieren nach
-Anlage durch den Testhost; der Prototyp scheitert an seiner `-f`-Prüfung vor
-`Path::Tiny->slurp_utf8`. Der Fehler ist somit bereits im ungepackten Windows-
-Dateizugriff vorhanden, nicht erst nach PAR-Verpackung. Eine Portierung braucht
-hier eine ausdrücklich Unicode-fähige Lösung; dieser Versuch repariert sie nicht.
-Die Diagnose ersetzt den strengen Smoke-Test nicht: dessen Windows-FAIL bleibt
-auch im letzten CI-Lauf bestehen, während Linux und macOS erneut PASS melden.
+All six processes start and return pure JSON with exit 0. On ASCII paths, the
+same Unicode file content is read correctly. The files exist after creation by
+the test host; the prototype fails its `-f` check before `Path::Tiny->slurp_utf8`.
+The error is therefore already present in unpacked Windows file access, not only
+after PAR packaging. A port needs an explicitly Unicode-capable solution here;
+this experiment does not fix it. The diagnosis does not replace the strict smoke
+test: Windows FAIL remains in the last CI run, while Linux and macOS again report PASS.
 
-Der erste Windows-Versuch scheiterte noch vor dem Build: Git Bash stellte sein
-eigenes `/usr/bin/perl` vor Strawberry Perl. Der korrigierte Workflow verwendet
-unter Windows PowerShell, unter Linux/macOS weiterhin Bash.
+The first Windows attempt failed before the build: Git Bash placed its own
+`/usr/bin/perl` before Strawberry Perl. The corrected workflow uses PowerShell
+on Windows and Bash on Linux/macOS.
 
-Keine Aussage über ARM, Cross-Compilation oder ältere Systembibliotheken.
-Der Workflow prüft RUNNER_ARCH; der Runner prüft platform.machine() und berichtet
-die eingebettete Perl-Architektur, statt das Runner-Label als Beweis zu nehmen.
+No statement applies to ARM, cross-compilation, or older system libraries.
+The workflow checks RUNNER_ARCH; the runner checks platform.machine() and
+reports the embedded Perl architecture instead of treating the runner label as proof.
 
-CI-Messwerte des zweiten Laufs, jeweils auf unterschiedlichen Hosts:
+CI measurements from the second run, each on different hosts:
 
-| Ziel | Binary-Bytes | Erster leerer PAR-Cache | Median fünf warmer Starts |
+| Target | Binary bytes | First empty PAR cache | Median of five warm starts |
 |---|---:|---:|---:|
 | Linux | 7.516.032 | 125,728 ms | 80,846 ms |
 | macOS | 6.950.067 | 848,640 ms | 221,138 ms |
-| Windows | 12.915.092 | nicht ausgewertet: Funktionsfehler | nicht ausgewertet |
+| Windows | 12.915.092 | not evaluated: functional failure | not evaluated |
 
-Das sind keine direkt vergleichbaren OS-Benchmarks. JSON-Prüfberichte liegen im
-CI-Lauf als kurzlebige Artefakte; es wurden keine Binaries veröffentlicht.
+These are not directly comparable OS benchmarks. JSON check reports remain as
+short-lived artifacts in the CI run; no binaries were published.
 
-Lokaler Stand: Perl 5.40.1, pp 1.064, Artefakt 9.758.529 Byte (etwa 9,31 MiB),
-208 Cachedateien / 16.197.654 Byte. Letzter Lauf mit erweitertem Unicode-Pfad:
-Erststart 632,066 ms, fünf Wiederholungen 272,364–385,379 ms
-(Median 286,473 ms), zweiter leerer Cache 767,009 ms. Build 2,676 Sekunden.
-ldd zeigt eingebettetes libperl.so.5.40 und externe libc, libm, libcrypt, libz
-sowie den ELF-Loader über Artefakt und extrahierte Bibliotheken hinweg.
-**Kein statisches Binary.** Lokale Rohdaten stehen ignoriert unter
-`build/build.json` und `build/smoke-linux.json`.
+Local state: Perl 5.40.1, pp 1.064, artifact 9.758.529 bytes (about 9.31 MiB),
+208 cache files / 16.197.654 bytes. Last run with extended Unicode path:
+cold start 632,066 ms, five repeats 272,364–385,379 ms
+(median 286,473 ms), second empty cache 767,009 ms. Build 2,676 seconds.
+ldd shows embedded libperl.so.5.40 and external libc, libm, libcrypt, libz,
+and the ELF loader across the artifact and extracted libraries.
+**Not a static binary.** Local raw data is ignored under
+`build/build.json` and `build/smoke-linux.json`.
 
-Zusätzlicher kleiner Vergleich mit identischem Ein-Skill-Minimalrequest, gleicher
-Minimalumgebung und je einem ungemessenen Vorlauf: fünf abwechselnde Starts von
-`/usr/bin/perl prototypes/perl-packaging/probe.pl` und dem warmen Artefakt ergaben
-Mediane von 70,036 ms gegenüber 293,180 ms (Differenz 223,144 ms). Rohdaten samt
-exakten Kommandos, Eingabe und Umgebung: `build/baseline-linux.json`. Das ordnet
-die möglichen Packaging-Kosten ein, ist aber kein allgemeiner Benchmark.
+An additional small comparison with an identical one-skill minimal request, the
+same minimal environment, and one unmeasured warm-up found median times from five
+alternating starts of `/usr/bin/perl prototypes/perl-packaging/probe.pl` and the
+warm artifact of 70,036 ms versus 293,180 ms (difference 223,144 ms). Raw data
+including exact commands, input, and environment: `build/baseline-linux.json`.
+This places possible packaging costs in context, but is not a general benchmark.
 
-### Separater Linux-Isolationsbeleg der Hauptsitzung
+### Separate Linux isolation evidence from the main session
 
-Die Hauptsitzung prüfte dasselbe Artefakt mit SHA256
+The main session checked the same artifact with SHA256
 `9b926bc29ccd47cddfd3cb41532e32b695dd9bdbd849f4121db189e9aa6a46c4`
-in einem lokalen debian:trixie-slim-Derivat (Linux x86_64, glibc 2.41).
-Laut gelesenem Dockerfile/Bericht wurden Perl-Programme, perl-base-Dateien und
-/usr/share/perl5 entfernt; Python und Node fehlen ebenfalls. Netzwerk aus,
-Root-Dateisystem schreibgeschützt, PAR_GLOBAL_TEMP im tmpfs. Unicode-Dateipfad
-außerhalb Windows-1252, vollständiger Unicode-Inhalt, fehlender Skill ohne
-Teilantwort und ungültiges JSON bestanden. Der Binary-Hash wurde hier mit dem
-geprüften Artefakt abgeglichen; der Containerlauf selbst wurde nicht vom Worker
-wiederholt. Beleg der Hauptsitzung:
-`/tmp/briefing-no-runtime.CDFih0/linux-no-runtime.json` und benachbartes Dockerfile
-(temporäre lokale Dateien, nicht Bestandteil dieses Prototyps).
-Container-Wandzeiten enthalten den Containerstart und sind **keine**
-Binary-Startzeiten. Dieser Nachweis gilt für genau dieses Artefakt und diese
-Linux-Umgebung, nicht für alle Distributionen oder andere Betriebssysteme.
+in a local debian:trixie-slim derivative (Linux x86_64, glibc 2.41).
+According to the Dockerfile/report that was read, Perl programs, perl-base files,
+and `/usr/share/perl5` were removed; Python and Node were absent as well. The
+network was off, the root filesystem read-only, and PAR_GLOBAL_TEMP in tmpfs.
+A Unicode file path outside Windows-1252, complete Unicode content, a missing
+skill without a partial response, and invalid JSON passed. The binary hash was
+compared here with the checked artifact; the worker did not rerun the container
+itself. Main-session evidence:
+`/tmp/briefing-no-runtime.CDFih0/linux-no-runtime.json` and the adjacent Dockerfile
+(temporary local files, not part of this prototype).
+Container wall-clock times include container startup and are **not** binary
+startup times. This evidence applies to exactly this artifact and this Linux
+environment, not to all distributions or other operating systems.
 
-Der Workflow läuft nach ausdrücklicher Freigabe manuell oder bei einem Push
-auf `spike/perl-packaging`, mit `contents: read`, nativen Builds und joblokalen
-CPAN-Abhängigkeiten. Er sichert ausschließlich JSON-Prüfberichte für sieben Tage;
-keine Binaries, Releases oder Änderungen an `main`. Die oben verlinkten nativen
-CI-Läufe wurden tatsächlich ausgeführt. Die Build-/Testhelfer selbst pushen oder
-starten keine CI.
+The workflow runs manually after explicit approval or on a push to
+`spike/perl-packaging`, with `contents: read`, native builds, and job-local CPAN
+dependencies. It retains only JSON check reports for seven days;
+no binaries, releases, or changes to `main`. The native CI runs linked above
+were actually executed. The build/test helpers themselves neither push nor
+start CI.
 
-Fazit: Der native Build funktioniert auf allen drei getesteten x86_64-Plattformen.
-Linux und macOS bestehen den Funktions-Smoke; unter Windows blockieren bereits
-Umlaut-Dateipfade die Eignung dieses unveränderten Prototyps, sowohl ungepackt als
-auch paketiert. Nur für die separate lokale Linux-Umgebung ist zusätzlich das
-Fehlen externer Interpreter nachgewiesen. ARM, eine native Umgebung ohne externes
-Perl auf macOS/Windows und echte Harness-Integration bleiben ungeprüft.
-Für einen winzigen Hook sind Archiv-/Startkosten und die Cache-Extraktion relevant:
-die Anwendung liest nur, der PAR-Launcher schreibt beim Erststart dagegen Dateien.
-Das ist noch keine Freigabe für eine vollständig portable, strikt lesende Hook-Auslieferung.
-Der Versuch endet bei diesen Befunden; Modulname und produktive Umsetzung bleiben offen.
+Conclusion: The native build works on all three tested x86_64 platforms.
+Linux and macOS pass the functional smoke; on Windows, umlaut file paths already
+block suitability for this unchanged prototype, both unpacked and packaged.
+Only the separate local Linux environment additionally proves the absence of
+external interpreters. ARM, a native environment without external Perl on
+macOS/Windows, and real harness integration remain untested.
+For a tiny hook, archive/startup costs and cache extraction are relevant:
+the application only reads, while the PAR launcher writes files on first start.
+This is not yet approval for a fully portable, strictly read-only hook delivery.
+The experiment ends with these findings; module name and production implementation
+remain open.

@@ -1,5 +1,7 @@
 {
-  "targets": ["claude"],
+  "targets": [
+    "claude"
+  ],
   "sources": {
     "getty": {
       "git": "https://github.com/Getty/skills"
@@ -10,13 +12,16 @@
   },
   "install": {
     "bundles": [
-      "getty-house@getty"
+      "getty-cpan-dist@getty"
     ],
     "skills": [
       "getty-git-commit-style@getty",
       "getty-git-usage@getty",
       "kanban-issues-karr-ticket@karr",
-      "kanban-issues-karr-coordination@karr"
+      "kanban-issues-karr-coordination@karr",
+      "getty-perl-core@getty",
+      "getty-perl-moo@getty",
+      "perl-release-dist-ini@getty"
     ]
   }
 }

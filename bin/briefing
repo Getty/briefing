@@ -1,0 +1,12 @@
+#!/usr/bin/env perl
+# ABSTRACT: Preload declared skills and diagnose briefing-aware agents
+# PODNAME: briefing
+
+use strict;
+use warnings;
+
+use App::Briefing::CLI;
+
+our $VERSION = '0.001';
+
+exit App::Briefing::CLI->run(\@ARGV);

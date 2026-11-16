@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wegwerf-Prüfung eines nativen Binaries; Python läuft ausschließlich auf dem TESTHOST."""
+"""Throwaway check of a native binary; Python runs exclusively on the TEST HOST."""
 import argparse
 import json
 import os
@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent
 
 
 def inspect_libraries(binary):
-    """Analyse auf dem Host, NICHT Teil der Ausführung der paketierten Anwendung."""
+    """Host analysis, NOT part of running the packaged application."""
     system = platform.system()
     candidates = (["ldd", str(binary)] if system == "Linux" else
                   ["otool", "-L", str(binary)] if system == "Darwin" else
@@ -65,7 +65,7 @@ def main():
     }
     checks = report["checks"]
     try:
-        # Kopie statt Symlink: echten Programmpfad mit Leerzeichen/Umlauten prüfen.
+        # Copy instead of symlink: test a real program path with spaces and umlauts.
         target_dir = work / "artifact ü space"
         target_dir.mkdir()
         target = target_dir / binary.name
@@ -85,12 +85,12 @@ def main():
 
         def run(data, cache, arguments=()):
             cache.mkdir(exist_ok=True)
-            # pp setzt PAR_TEMP zurück; die öffentliche Vorgabe heißt PAR_GLOBAL_TEMP.
-            # Locale C ist überall verfügbar; Protokoll und Dateiinhalte nutzen explizit UTF-8.
+            # pp resets PAR_TEMP; the public setting is PAR_GLOBAL_TEMP.
+            # Locale C is universally available; the protocol and file content use explicit UTF-8.
             env = {"PATH": "", "PAR_GLOBAL_TEMP": str(cache), "HOME": str(work),
                    "TMPDIR": str(work), "TMP": str(work), "TEMP": str(work),
                    "LANG": "C", "LC_ALL": "C"}
-            # Vom Windows-Loader benötigt; kein PATH zu Perl oder Python.
+            # Required by the Windows loader; no PATH to Perl or Python.
             for key in ("SystemRoot", "WINDIR"):
                 if key in os.environ:
                     env[key] = os.environ[key]
@@ -101,7 +101,7 @@ def main():
             if result.returncode != 0 or result.stderr:
                 raise AssertionError("exit=%d stderr=%r stdout=%r" %
                                      (result.returncode, result.stderr, result.stdout))
-            # Striktes Dekodieren und json.loads lehnen Zusatztext und mehrere JSON-Werte ab.
+            # Strict decoding and json.loads reject extra text and multiple JSON values.
             value = json.loads(result.stdout.decode("utf-8"))
             if not isinstance(value, dict):
                 raise AssertionError("stdout is not one JSON object")

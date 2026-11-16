@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Nur nativer pp-Build: Python und Perl werden auf dem BUILDHOST benötigt, nicht zur Laufzeit."""
+"""Native pp build only: Python and Perl are required on the BUILD HOST, not at runtime."""
 import argparse
 import json
 import os
@@ -21,7 +21,7 @@ build = ROOT / "build"
 build.mkdir(exist_ok=True)
 output = build / ("probe.exe" if os.name == "nt" else "probe")
 env = os.environ.copy()
-env["PAR_VERBATIM"] = "1"  # Wie bei skilletor: pp-Filter zum Entfernen von POD nicht verwenden.
+env["PAR_VERBATIM"] = "1"  # As in skilletor: do not use pp's filter that removes POD.
 env["PAR_GLOBAL_TEMP"] = str(build / "pack-cache")
 versions = subprocess.check_output([
     perl, "-MJSON::PP", "-MPAR::Packer", "-MPath::Tiny", "-MConfig", "-e",

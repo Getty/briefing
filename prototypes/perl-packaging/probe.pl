@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# WEGWERF-Packaging-Prototyp. Kein echter Harness-Hook, kein Modul/keine Distribution.
+# THROWAWAY packaging prototype. Not a real harness hook, module, or distribution.
 use strict;
 use warnings;
 use Config ();
@@ -51,5 +51,5 @@ for my $skill (@{$request->{skills}}) {
   push @skills, { name => $skill->{name}, body => $body };
 }
 
-# Erst nach ALLEN erfolgreichen Lesezugriffen ausgeben; Fehler enthalten keine Skill-Inhalte.
+# Emit only after ALL successful reads; errors contain no skill content.
 _emit({ ok => JSON::PP->true, skills => \@skills });

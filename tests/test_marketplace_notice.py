@@ -11,20 +11,27 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from cli_driver import command_for
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "briefing-marketplace-notice"
 
 
 def run_hook(*, fake_home, plugin_root):
-    env = {**os.environ, "HOME": str(fake_home)}
+    env = {
+        **os.environ,
+        "HOME": str(fake_home),
+        "PYTHONIOENCODING": "utf-8",
+    }
     if plugin_root is None:
         env.pop("CLAUDE_PLUGIN_ROOT", None)
     else:
         env["CLAUDE_PLUGIN_ROOT"] = str(plugin_root)
     return subprocess.run(
-        ["python3", str(HOOK)],
+        command_for("notice", ["python3", str(HOOK)]),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         timeout=10,
     )

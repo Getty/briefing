@@ -1,84 +1,85 @@
-# Agenten, Deklarationen und Skill-Auflösung
+# Agents, declarations, and skill resolution
 
-Maßgeblich: `hooks/briefing-preload`; Verhalten mit `tests/test_briefing.py`,
-`tests/test_briefing_codex.py` und `tests/test_briefing_doctor.py` absichern.
-Jeder Harness bekommt seine eigenen Suchorte, nicht eine gemeinsame globale Liste.
+Authoritative implementation: `hooks/briefing-preload`; protect behavior with
+`tests/test_briefing.py`, `tests/test_briefing_codex.py`, and
+`tests/test_briefing_doctor.py`.
+Each harness gets its own search locations, not a shared global list.
 
 ## Claude Code
 
-Agenten: `.claude/agents/` im `cwd`, danach im Benutzer-Home, rekursiv nach `.md`.
-Identität ist das Frontmatter-`name`; der Dateiname ist Fallback und schneller Suchpfad,
-kein Ersatz für ein abweichendes `name`. Deklaration unter `briefing.skills`,
-als YAML-Block oder Flow-Liste. Ein top-level `skills:` gehört dem Harness.
+Agents: `.claude/agents/` in `cwd`, then in the user's home, recursively for `.md`.
+Identity is the frontmatter `name`; the file name is a fallback and fast search path,
+not a replacement for a differing `name`. Declare under `briefing.skills`,
+as a YAML block or flow list. A top-level `skills:` belongs to the harness.
 
-Bare Skills: `<cwd>/.claude/skills` → `~/.claude/skills` → installierte Plugins.
-`plugin:skill` geht direkt zur Plugin-Auflösung.
+Bare skills: `<cwd>/.claude/skills` → `~/.claude/skills` → installed plugins.
+`plugin:skill` resolves directly through plugin resolution.
 
-- Installationsindex: `~/.claude/plugins/installed_plugins.json`, nicht Cache-Globs.
-  Alte Versionen und Commit-Hashes bleiben im Cache; Sortierung findet nicht den Live-Stand.
-- `installPath` ist die Plugin-Wurzel. Projekt-/Local-Einträge gelten nur innerhalb
-  ihres `projectPath` und haben vor Benutzerinstallationen Vorrang.
-- `enabledPlugins` wird pro Schlüssel aus Benutzer-, Projekt- und
-  `.claude/settings.local.json` zusammengeführt, spätere Ebene gewinnt.
-  Nur `true` aktiviert ein Marketplace-Plugin; fehlend und `false` deaktivieren es.
-- `--settings` und Managed Settings sind dem Hook nicht zugänglich. Ein nur dort
-  gesetzter Zustand ist keine auflösbare Konfiguration für diesen Hook.
-- Skills: `skills/<name>/` sowie Manifest-`skills`-Pfade. Jeder zusätzliche Pfad
-  bezeichnet einen Skill oder ein Verzeichnis unmittelbar enthaltener Skills.
-  Tiefere, nicht deklarierte Strukturen sind keine impliziten Skills.
-- Namespace ist der Manifestname, nicht zwingend der Verzeichnisname.
-  Zusätzliche `skills` aus Marketplace-Einträgen liest dieser Checkout noch nicht.
+- Installation index: `~/.claude/plugins/installed_plugins.json`, not cache globs.
+  Old versions and commit hashes remain in the cache; sorting cannot find the live version.
+- `installPath` is the plugin root. Project/local entries apply only within their
+  `projectPath` and take precedence over user installations.
+- `enabledPlugins` is merged per key from user, project, and
+  `.claude/settings.local.json`; the later layer wins.
+  Only `true` enables a marketplace plugin; absent and `false` disable it.
+- `--settings` and managed settings are inaccessible to the hook. A state set
+  only there is not resolvable configuration for this hook.
+- Skills: `skills/<name>/` and manifest `skills` paths. Each additional path
+  denotes one skill or a directory containing skills directly.
+  Deeper, undeclared structures are not implicit skills.
+- The namespace is the manifest name, not necessarily the directory name.
+  This checkout does not yet read additional `skills` from marketplace entries.
 
-## Codex-Deklaration
+## Codex declaration
 
 ```toml
 name = "my_agent"
 description = "..."
 # briefing: skills = ["skill-a", "plugin:skill-b"]
 developer_instructions = """
-Die Aufgabe dieses Agenten.
+This agent's task.
 """
 ```
 
-Die Kommentarzeile steht außerhalb mehrzeiliger Strings. `parse_skills_comment`
-verfolgt deren Zustand, damit Beispieltext keine Deklaration wird.
-Codex 0.153 verwirft Agenten mit unbekannten TOML-Feldern (`deny_unknown_fields`),
-auch `[briefing]`; das ist kein freier Metadaten-Namespace. Eine Sidecar-`.toml`
-unter `agents/` wäre selbst eine Agentendefinition.
+The comment line is outside multiline strings. `parse_skills_comment` tracks
+their state so example text does not become a declaration.
+Codex 0.153 rejects agents with unknown TOML fields (`deny_unknown_fields`),
+including `[briefing]`; that is not a free-form metadata namespace. A sidecar
+`.toml` under `agents/` would itself be an agent definition.
 
-Die Legacy-Tabelle bleibt für ältere Harnesses lesbar, mit Migrationswarnung.
-Der Kommentar hat Vorrang; eine vorhandene Legacy-Deklaration wird weiter diagnostiziert.
-`parse_skills_toml` importiert `tomllib` lokal (Python 3.11+), sonst nutzt es den
-engen Regex-Fallback für diese Tabelle und diesen Schlüssel.
+The legacy table remains readable for older harnesses, with a migration warning.
+The comment takes precedence; an existing legacy declaration remains diagnosed.
+`parse_skills_toml` imports `tomllib` locally (Python 3.11+), otherwise it uses
+the narrow regex fallback for this table and key.
 
-`[[skills.config]]` bedeutet Sichtbarkeit für den Agenten, nicht Vorladen.
-Diese unabhängige Entscheidung bleibt unberührt.
+`[[skills.config]]` means visibility to the agent, not preloading.
+That independent decision remains unchanged.
 
-## Codex-Agenten finden
+## Find Codex agents
 
-Konfigurationsebenen: jede `.codex/` von `cwd` zur nächsten `.git`-Projektwurzel,
-danach `$CODEX_HOME` (Standard `~/.codex`), danach `/etc/codex`.
-Ohne gefundene Projektwurzel wird nur `cwd` als Projektebene verwendet.
+Configuration layers: every `.codex/` from `cwd` to the nearest `.git` project
+root, then `$CODEX_HOME` (default `~/.codex`), then `/etc/codex`.
+Without a found project root, only `cwd` is used as the project layer.
 
-Pro Ebene hat `[agents.<name>] config_file` in `config.toml` Vorrang; relative
-Pfade beziehen sich auf die Konfigurationsdatei. Zusätzlich werden alle `*.toml`
-unter `agents/` rekursiv nach ihrem `name` durchsucht.
-`<name>.toml` ist nur schneller Suchpfad und wird bei abweichendem `name` übersprungen.
-Die nächstgelegene Ebene gewinnt. Upstream-Referenz:
+Within each layer, `[agents.<name>] config_file` in `config.toml` takes
+precedence; relative paths are relative to the configuration file. Additionally,
+all `*.toml` below `agents/` are searched recursively for their `name`.
+`<name>.toml` is only a fast search path and is skipped when its `name` differs.
+The nearest layer wins. Upstream reference:
 `codex-rs/agent-roles/src/{loader,discovery}.rs`.
 
-## Codex-Skills finden
+## Find Codex skills
 
-Pro Projektverzeichnis von `cwd` bis zur nächsten `.git`, nächstgelegen zuerst:
-`.codex/skills` → `.agents/skills`. Danach:
+For each project directory from `cwd` to the nearest `.git`, nearest first:
+`.codex/skills` → `.agents/skills`. Then:
 
 1. `$CODEX_HOME/skills`
 2. `~/.agents/skills`
 3. `$CODEX_HOME/skills/.system`
 4. `/etc/codex/skills`
 
-`plugin:skill` ist auch in Codex gültig; verifiziert mit `briefing:briefing` in
-`codex debug prompt-input`. Der typische Plugin-Pfad ist
+`plugin:skill` is also valid in Codex; verified with `briefing:briefing` in
+`codex debug prompt-input`. The typical plugin path is
 `$CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/`.
-Der Codex-Resolver dieses Checkouts nutzt Cache-Globs; die indexbasierte
-Claude-Code-Auflösung nicht ungeprüft als bereits implementiert dokumentieren.
+This checkout's Codex resolver uses cache globs; do not document index-based
+Claude Code resolution as already implemented without verification.

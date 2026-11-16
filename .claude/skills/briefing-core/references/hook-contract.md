@@ -1,12 +1,12 @@
-# Hook-Vertrag dieses Checkouts
+# Hook contract for this checkout
 
-Gilt für `hooks/briefing-preload`, nicht ungeprüft für installierte Plugin-Versionen.
-`main()` routet `SubagentStart` zum gemeinsamen Briefing, `SessionStart` zum
-Pre-flight und ansonsten nur `tool_name == "Agent"` zum Claude-Code-Guard.
-Als `briefing-doctor` oder mit erstem Argument `doctor` läuft dieselbe Auflösung als CLI.
-`bin/briefing-doctor` ist der ausführbare Wrapper dafür.
+Applies to `hooks/briefing-preload`, not unchecked to installed plugin versions.
+`main()` routes `SubagentStart` to the shared briefing, `SessionStart` to
+pre-flight, and otherwise only `tool_name == "Agent"` to the Claude Code guard.
+When invoked as `briefing-doctor` or with `doctor` as its first argument, the same
+resolution runs as a CLI. `bin/briefing-doctor` is its executable wrapper.
 
-## Claude Code: PreToolUse-Guard
+## Claude Code: PreToolUse guard
 
 ```json
 {
@@ -16,17 +16,17 @@ Als `briefing-doctor` oder mit erstem Argument `doctor` läuft dieselbe Auflösu
 }
 ```
 
-Fehlender deklarierter Skill: `hookSpecificOutput` mit
-`hookEventName: "PreToolUse"`, `permissionDecision: "deny"` und
-`permissionDecisionReason`. Sonst Exit 0, leeres stdout — auch bei Erfolg.
-Der Guard verändert den Aufruf nie und gibt niemals `updatedInput` aus.
-Auto-mode prüft den Aufruf vor den Hooks und kann nachträgliche Änderungen
-verweigern: `a hook changed this call's input after auto mode reviewed it`.
-Das frühere Prompt-Rewrite bis briefing 0.5.x deshalb nicht wieder einführen.
+Missing declared skill: `hookSpecificOutput` with
+`hookEventName: "PreToolUse"`, `permissionDecision: "deny"`, and
+`permissionDecisionReason`. Otherwise exit 0 with empty stdout — even on success.
+The guard never changes the call and never emits `updatedInput`.
+Auto mode reviews the call before hooks and can deny subsequent changes:
+`a hook changed this call's input after auto mode reviewed it`.
+Therefore, do not reintroduce the prompt rewrite used through briefing 0.5.x.
 
-## SubagentStart: beide Harnesses
+## SubagentStart: both harnesses
 
-Claude Code, beobachteter Payload in 2.1.318 (ohne `permission_mode`):
+Claude Code, observed payload in 2.1.318 (without `permission_mode`):
 
 ```json
 {
@@ -45,48 +45,50 @@ Codex:
 }
 ```
 
-`spawn_harness` unterscheidet zuerst über `transcript_path` (`/.claude/` versus
-`/.codex/` beziehungsweise `$CODEX_HOME`), dann über das Vorhandensein von
-Codex' `turn_id`. Ohne eindeutiges Signal gewinnt ein gefundener Claude-Code-Agent,
-sonst wird Codex verwendet. `agent_type` ist der deklarierte Agentenname, nicht
-zwingend der Dateiname. Kein passender Agent oder keine Deklaration bedeutet
-Exit 0 und leeres stdout; Built-ins ohne Agentendatei sind ebenfalls No-op.
+`spawn_harness` first distinguishes through `transcript_path` (`/.claude/` versus
+`/.codex/` or `$CODEX_HOME`), then through Codex's `turn_id`. With no unambiguous
+signal, a found Claude Code agent wins; otherwise Codex is used. `agent_type` is
+the declared agent name, not necessarily the file name. No matching agent or no
+declaration means exit 0 and empty stdout; built-ins without an agent file are
+also no-ops.
 
-Erfolg: `hookSpecificOutput.hookEventName: "SubagentStart"` und
-`additionalContext` mit vollständigem Briefing.
-Fehlender Skill: stattdessen eine Anweisung, die Aufgabe nicht zu bearbeiten und
-zum Auftraggeber mit dem Fehler zurückzukehren; zusätzlich `systemMessage`.
-Auch bereits auflösbare Skills bleiben bei einem Fehler draußen. Das gilt auch,
-wenn unter Claude Code ein Skill zwischen Guard und `SubagentStart` verschwindet.
+Success: `hookSpecificOutput.hookEventName: "SubagentStart"` and
+`additionalContext` with the complete briefing.
+Missing skill: instead, an instruction not to perform the task and to return to
+the requester with the error; additionally, `systemMessage`.
+Even skills that were already resolvable remain out when an error occurs. This
+also applies if, under Claude Code, a skill disappears between the guard and
+`SubagentStart`.
 
-Bei `SubagentStart` kann keiner der Harnesses den Spawn sperren. Codex ignoriert
-`continue: false` trotz Kompatibilitätsparser; ein Teil-Briefing ist kein Ersatz.
-`additionalContextLimit: 0` in `hooks/hooks.json` verhindert, dass Codex lange
-Ausgaben auf Disk auslagert und nur eine Vorschau in den Modellkontext gibt
-(der Standard liegt ungefähr bei 2500 Tokens).
+Neither harness can stop the spawn at `SubagentStart`. Codex ignores
+`continue: false` despite its compatibility parser; a partial briefing is not a
+substitute. `additionalContextLimit: 0` in `hooks/hooks.json` prevents Codex
+from writing long output to disk and providing only a preview to the model
+context (the default is about 2500 tokens).
 
-**Legacyharness-Falle:** Claude Code muss Kontext aus `SubagentStart` übernehmen
-können; geprüft wurde 2.1.318, nicht die frühestmögliche Version. Alte Versionen
-ohne diese Unterstützung starten den Agenten still unbriefed: ein erfolgreicher
-Guard injiziert nichts und ist kein Fallback.
+**Legacy-harness caveat:** Claude Code must support context from `SubagentStart`;
+2.1.318 was tested, not the earliest possible version. Older versions without
+this support start the agent silently unbriefed: a successful guard injects
+nothing and is not a fallback.
 
-## Gemeinsame Ausgabe
+## Shared output
 
-`SubagentStart` schreibt bei Erfolg eine Audit-Zeile für den Menschen in `systemMessage`:
-`briefing: my-agent ← skill-a, skill-b (N kB)`; Warnungen folgen als weitere Zeilen.
-Über 64 KiB Skill-Text wird gewarnt, aber nicht verweigert.
-Jeder Skill wird ohne Frontmatter so eingebettet:
+On success, `SubagentStart` writes an audit line for the human to `systemMessage`:
+`briefing: my-agent ← skill-a, skill-b (N kB)`; warnings follow on further lines.
+More than 64 KiB of skill text warns but does not deny.
+Each skill is embedded without frontmatter as follows:
 
 ```xml
 <skill name="skill-a" dir="/abs/path/to/skill-a">
-…SKILL.md-Inhalt…
+…SKILL.md content…
 </skill>
 ```
 
-`dir` ist absolut; nur der Haupttext wird vorgeladen. Weitere Dateien bleiben
-progressiv zugänglich. Ein Skill lädt keine weiteren `briefing.skills` rekursiv.
+`dir` is absolute; only the main text is preloaded. Further files remain
+progressively accessible. A skill does not recursively load further
+`briefing.skills`.
 
-## SessionStart: beide Harnesses
+## SessionStart: both harnesses
 
 ```json
 {
@@ -95,22 +97,22 @@ progressiv zugänglich. Ein Skill lädt keine weiteren `briefing.skills` rekursi
 }
 ```
 
-Nur ein top-level `systemMessage` für nicht funktionierende Deklarationen, sonst
-keine Ausgabe. Niemals `hookSpecificOutput`, das hier Modellkontext erzeugen würde.
-`transcript_path` unterscheidet `/.codex/` beziehungsweise `$CODEX_HOME` und
-`/.claude/`; ohne eindeutiges Signal werden beide geprüft.
-`startup`, `resume` und fehlendes `source` werden geprüft; andere Quellen wie
-Compaction bleiben still. Überlange, aber funktionierende Briefings werden hier
-nicht erneut gemeldet. Der Doctor zeigt dagegen Fehler und Budgetwarnungen.
+Only a top-level `systemMessage` for declarations that do not work, otherwise no
+output. Never `hookSpecificOutput`, which would create model context here.
+`transcript_path` distinguishes `/.codex/` or `$CODEX_HOME` from `/.claude/`;
+without an unambiguous signal, both are checked.
+`startup`, `resume`, and a missing `source` are checked; other sources such as
+compaction remain silent. Overlong but working briefings are not reported again
+here. Doctor, by contrast, shows errors and budget warnings.
 
-## Gemeinsame Hook-Datei
+## Shared hook file
 
-`hooks/hooks.json` bleibt gemeinsam: `SubagentStart` bedient beide Harnesses,
-`PreToolUse` nur den Claude-Code-Guard. Codex löst auch `${CLAUDE_PLUGIN_ROOT}` auf.
-Die Windows-Aufrufweise ist
-exec-form (`command` mit `args: []`); der `.exe`-Launcher läuft dort statt des
-extensionlosen Skripts. Hintergrund und native Tests: `winlaunch/README.md`.
+`hooks/hooks.json` remains shared: `SubagentStart` serves both harnesses,
+`PreToolUse` only the Claude Code guard. Codex also resolves `${CLAUDE_PLUGIN_ROOT}`.
+Windows invocation is exec form (`command` with `args: []`); the `.exe` launcher
+runs there instead of the extensionless script. Background and native tests:
+`winlaunch/README.md`.
 
-`hooks/briefing-marketplace-notice` ist ein separater SessionStart-Hinweis mit
-eigener Zustandsspeicherung; die Lesend-/Seiteneffektfrei-Garantie des Preload-Hooks
-ist keine Behauptung über diesen Notice-Hook.
+`hooks/briefing-marketplace-notice` is a separate SessionStart notice with its
+own state storage; the read-only and side-effect-free guarantee of the preload
+hook is not a claim about this notice hook.

@@ -2,40 +2,44 @@
 
 > Programmatic briefing beats prompt stuffing.
 
-Plugin für Claude Code und Codex: deklarierte Skills gelangen beim Subagent-Start
-vollständig in den Kontext. Nutzung und Installation: [README.md](README.md).
+A plugin for Claude Code and Codex: declared skills reach subagents in full at
+spawn time. Usage and installation: [README.md](README.md).
 
-## Vor der Arbeit
+## Repository language
 
-- **Hooks, Auflösung, Doctor, Tests oder Windows-Launcher:**
-  [briefing-core](.claude/skills/briefing-core/SKILL.md) lesen; die Referenzen dort
-  trennen Hook-Vertrag, Suchregeln und echte Harness-Verifikation.
-- **Zuständigkeiten und Prüfgrenzen:**
+Write repository content in **English**, including skills, agents, documentation,
+comments and CI text. Keep non-English strings only as intentional test fixtures.
+
+## Before working
+
+- **Hooks, resolution, doctor, tests or Windows launchers:** read
+  [briefing-core](.claude/skills/briefing-core/SKILL.md). Its references separate
+  the hook contract, resolution rules and live harness verification.
+- **Ownership and verification:**
   [.claude/rules/briefing-rules.md](.claude/rules/briefing-rules.md).
-- **Agenten für Plugin-Nutzer verfassen:**
-  [Produkt-Skill](skills/briefing/SKILL.md); nicht mit dem Entwicklungs-Skill verwechseln.
-- **Perl-Port oder Auslieferung planen:**
-  [App::Briefing-Zielrichtung](docs/perl-direction.md) und die dort verlinkte Packaging-Probe lesen.
+- **Writing agents for plugin users:**
+  [product skill](skills/briefing/SKILL.md); distinct from the development skill.
+- **Planning the Perl port or distribution:** read
+  [the App::Briefing direction](docs/perl-direction.md) and its packaging probe.
 
-## Das Agententeam
+## The agent team
 
-- `briefing-scout`: liest und berichtet, verändert nichts.
-- `briefing-worker`: implementiert und pflegt Code sowie Skills, committet nicht.
-- `briefing-test-writer`: schreibt Tests, verändert nicht die Implementierung.
-- `briefing-reviewer`: prüft Änderungen und führt Tests aus, verändert keine Dateien.
-- `briefing-release-manager`: übernimmt genehmigte Commits, `Changes` und Release-Prüfungen.
+- `briefing-scout`: reads and reports; changes nothing.
+- `briefing-worker`: implements code and maintains skills; never commits.
+- `briefing-test-writer`: writes tests; leaves implementation to the worker.
+- `briefing-reviewer`: reviews changes and runs tests; changes no files.
+- `briefing-release-manager`: owns authorized commits, `Changes` and release checks.
 
-Arbeit liegt im bestehenden Karr-Board (`karr list --compact`), nicht in einem
-zweiten Dateiboard. Neue Agenten benötigen einen Neustart von Claude Code.
+Work belongs on the existing karr board (`karr list --compact`), not a second file
+board. Newly created agents may require a fresh Claude Code session.
 
-## Gemeinsame Regeln und Skills
+## Shared rules and skills
 
-`.claude/skilletor.json` deklariert die Quellen und das Bundle `getty-house`.
-`skilletor sync --scope project` installiert die gemeinsamen Dateien;
-`skilletor check --scope project` prüft den Stand. Verwaltete Kopien werden
-an ihrer Quelle geändert. Dieses Entwicklungsteam nutzt das Ziel `claude`;
-das Plugin selbst unterstützt weiterhin beide Harnesses.
+`.claude/skilletor.json` declares sources and the `getty-cpan-dist` bundle.
+`skilletor sync --scope project` installs shared files;
+`skilletor check --scope project` checks their state. Edit managed copies at their
+source. This development team targets `claude`; the product supports both harnesses.
 
-Projektagenten, `briefing-core`, Settings und skilletor-Konfiguration bleiben
-versioniert; installierte Regeln/Skills, Lock und lokale Settings nicht.
-Hausregeln kommen aus skilletor und werden hier nicht noch einmal kopiert.
+Project agents, `briefing-core`, settings and skilletor configuration are tracked.
+Installed rules/skills, the lock and local settings are not. House rules come from
+skilletor rather than being duplicated here.

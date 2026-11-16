@@ -1,37 +1,37 @@
-# Projektagenten und skilletor
+# Project agents and skilletor
 
-## Ziel und Umfang
+## Goal and scope
 
-Den Entwicklungs-Checkout von briefing auf das aktuelle Getty-Preset bringen:
-fünf Projektagenten, verwaltete gemeinsame Regeln und kurze Einstiegshinweise.
-Die bestehende Hook-Implementierung und ihre öffentlichen Verträge bleiben unverändert.
-Der Nutzer hat diesen Umfang am 2026-11-16 bestätigt.
+Bring the briefing development checkout into line with the current Getty preset:
+five project agents, managed shared rules and a short entry point.
+The existing hook implementation and its public contracts remain unchanged by
+this setup task. The user approved that scope on 2026-11-16.
 
-## Gewählter Ansatz
+## Chosen approach
 
-Gemeinsame Regeln und Git-/Karr-Skills kommen über skilletor aus ihren Eigentümer-Repositories;
-`briefing-core` und die Agenten bleiben versionierte, projektspezifische Quellen.
-Eine weitere handgepflegte Kopie der Hausregeln würde wieder auseinanderlaufen.
-Ein umfassender Umbau beider Harnesses wäre dagegen mehr als die beauftragte Einrichtung.
-Das Entwicklungsteam richtet sich nach dem vorhandenen skilletor-Ziel `claude`;
-die Produktunterstützung für Codex bleibt unverändert.
+Shared rules and Git/karr skills come through skilletor from their owning
+repositories; `briefing-core` and the agents remain tracked project sources.
+Another manually maintained copy of the house rules would drift again.
+A comprehensive rewrite of both harnesses would exceed this setup task.
+The development team follows the existing skilletor target `claude`;
+the product's Codex support remains unchanged.
 
-## Struktur
+## Structure
 
-- `.claude/skilletor.json`: portable Quellen, `getty-house`, Git- und Karr-Skills.
-- `.claude/settings.json`: benötigte Plugins und Marketplace, keine neuen Berechtigungen.
-- `.claude/skills/briefing-core/`: kompakte Projektkonventionen mit ausgelagerten Referenzen.
+- `.claude/skilletor.json`: portable sources, `getty-house`, Git and karr skills.
+- `.claude/settings.json`: required plugins and marketplace; no new permissions.
+- `.claude/skills/briefing-core/`: concise project conventions with disclosed references.
 - `.claude/agents/briefing-{scout,worker,test-writer,reviewer,release-manager}.md`:
-  getrennte Zuständigkeiten, Wissen ausschließlich über `briefing.skills`.
-- `.claude/rules/briefing-rules.md`: Zuständigkeiten und projektspezifische Prüfhinweise.
-- `CLAUDE.md`: kurzer Einstieg mit bedingten Verweisen statt vollständigem Handbuch.
+  distinct ownership, knowledge declared through `briefing.skills`.
+- `.claude/rules/briefing-rules.md`: ownership and project-specific verification notes.
+- `CLAUDE.md`: a short entry point with conditional pointers rather than a full manual.
 
-## Grenzen und Nachweise
+## Constraints and evidence
 
-Python 3.8+ für gemeinsame und Claude-Code-Pfade, ausschließlich Standardbibliothek.
-Keine Hook-, Produkt-Skill-, Binärdatei- oder Manifeständerung. Kein Commit oder Push.
-Das bestehende Karr-Board bleibt erhalten. k5 betrifft eigenständige Binaries ohne Python
-und wird nicht als Einrichtungsticket umgewidmet oder abgeschlossen.
-Prüfung mit skilletor check, ack-team check, briefing-doctor, negativem Hook-Test,
-Link-/Git-Prüfung und der bestehenden unittest-Suite. Native Windows-Tests und echte
-Harness-Spawns nur als bestanden melden, wenn sie tatsächlich ausgeführt wurden.
+Python 3.8+ for shared and Claude Code paths; standard library only.
+No hook, product-skill, binary or manifest changes. No commit or push in this
+initial setup scope. Keep the existing karr board. k5 concerns standalone
+binaries without Python, not this setup; do not repurpose or close it.
+Verify skilletor state, ack-team, briefing-doctor, a negative hook probe,
+links/Git visibility and the existing unittest suite. Report native Windows
+checks and real harness spawns as passed only when actually executed.

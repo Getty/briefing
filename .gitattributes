@@ -1,4 +1,6 @@
-# Line endings stay LF in every checkout, whatever core.autocrlf says: the
-# hooks are Python scripts with a shebang.
+# Executable scripts keep LF in every checkout, regardless of core.autocrlf.
 * text=auto eol=lf
 *.exe binary
+
+# LicenseFile requires the canonical Software::License text, including its spaces.
+LICENSE whitespace=-blank-at-eol

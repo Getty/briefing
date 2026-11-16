@@ -1,6 +1,9 @@
 Revision history for briefing
 
 {{$NEXT}}
+  - A reusable `App::Briefing` Perl library and `briefing` CLI provide the hook,
+    doctor, and marketplace notice in a source distribution at the repository
+    root. Python plugin starters remain until binary cutover.
   - Claude Code: skills arrive through `SubagentStart` `additionalContext`
     instead of a rewritten agent prompt, so briefing works with
     `--permission-mode auto`. Auto mode refused any `Agent` call whose input a

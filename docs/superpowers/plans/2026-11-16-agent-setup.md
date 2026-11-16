@@ -1,65 +1,65 @@
 # Agent Setup Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans. Die Einrichtung erfolgt direkt in dieser Sitzung; weder Produktcode noch Commit sind Teil des Auftrags.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans. Set up directly in this session; production code and commits are outside the initial setup scope.
 
-**Goal:** Ein geprüftes Getty-Projektteam mit skilletor und kompakten Projektanweisungen einrichten.
-**Architecture:** skilletor verwaltet gemeinsame Regeln und Skills; projektspezifische Agenten und `briefing-core` bleiben eigene Quellen. CLAUDE.md verweist auf das benötigte Wissen.
+**Goal:** Set up a checked Getty project team with skilletor and concise project instructions.
+**Architecture:** skilletor manages shared rules and skills; project agents and `briefing-core` remain owned sources. CLAUDE.md points to relevant knowledge.
 **Tech Stack:** Markdown/YAML, JSON, skilletor, briefing, Python unittest.
 **Spec:** `docs/superpowers/specs/2026-11-16-agent-setup-design.md`
 
 ## Global Constraints
 
-- Python 3.8+ für gemeinsame und Claude-Code-Pfade, ausschließlich Standardbibliothek.
-- Keine Hook-, Produkt-Skill-, Binärdatei- oder Manifeständerung. Kein Commit oder Push.
-- Fünf Rollen: scout, worker, test-writer, reviewer, release-manager.
-- Bestehendes Karr-Board unverändert; k5 bleibt die eigenständige Binary-Aufgabe.
+- Python 3.8+ for shared and Claude Code paths; standard library only.
+- No hook, product-skill, binary or manifest changes. No commit or push in the initial scope.
+- Five roles: scout, worker, test-writer, reviewer, release-manager.
+- Keep the karr board unchanged; k5 remains the separate binary task.
 
 ## Review Focus
 
-- Frischer Checkout: Quellen und Plugin-Voraussetzungen sind versionierbar, installierte Kopien ignoriert.
-- Fehlender Skill: ein vollständiges Briefing oder eine explizite Verweigerung, nie Teilkontext.
-- Verlagerte Dokumentation: bisherige Schutzregeln und Live-Test-Fallen bleiben erreichbar.
-- Zuständigkeiten: Git-/Release-Wissen ausschließlich im Release-Manager, lesende Rollen ohne Schreibwerkzeuge.
-- Falscher Erfolg: getesteten Checkout, installierte Plugin-Version und echte Harness-Starts unterscheiden.
+- Fresh checkout: sources and plugin requirements are tracked, installed copies ignored.
+- Missing skill: a complete briefing or an explicit refusal, never partial context.
+- Relocated documentation: existing guardrails and live-test traps stay reachable.
+- Ownership: Git/release skills only in the release manager; read-only roles cannot edit files.
+- False success: distinguish checkout, installed plugin and actual harness starts.
 
-## Task 1: Einrichtung und Dokumentationsmigration
+## Task 1: Setup and documentation migration
 
 **Files:** `.claude/skilletor.json`, `.claude/settings.json`, `.claude/.gitignore`,
-`.worktreeinclude`, `.claude/skills/briefing-core/SKILL.md` mit `references/`,
+`.worktreeinclude`, `.claude/skills/briefing-core/SKILL.md` and `references/`,
 `.claude/agents/briefing-*.md`, `.claude/rules/briefing-rules.md`, `CLAUDE.md`, `.gitignore`.
-**Interfaces:** Agenten deklarieren `briefing-core`, Rollen-Skills und Karr-Ticket-Skill;
-Settings aktivieren briefing, skilletor und superpowers.
+**Interfaces:** Agents declare `briefing-core`, role skills and the karr ticket skill;
+settings enable briefing, skilletor and superpowers.
 
-- [x] Ausgangszustand prüfen: ack-team meldet fehlende Agenten, Regeln und Settings; 95 unittest-Tests bestehen.
-- [x] Bestehendes Ticket lesen: k5 behandelt Binaries, nicht die Einrichtung.
-- [x] Quellen und Hausregeln mit skilletor installieren; vorhandene lokale Quellen nutzen.
-- [x] Projektwissen in `briefing-core` und Referenzen verlagern, fünf Agenten und kurze Regeln schreiben.
-- [x] CLAUDE.md auf Einstieg und eindeutige Verweise kürzen; lokale Dateien und Karr-Materialisierung korrekt ignorieren.
-- [x] `skilletor check --scope project`, `ack-team check` und beide Doctor-Versionen ohne fehlende Skills.
-- [x] Positiven Hook-Output pro Rolle und negativen Probe-Agenten prüfen.
-- [x] Markdown-Verweise, Git-Sichtbarkeit und `git diff --check` prüfen.
-- [x] `python3 -m unittest discover tests` ausführen; erwartet: 95 bestandene Tests.
-- [x] Ergebnis prüfen und nicht ausgeführte Live-/Plattformprüfungen nennen; keine Veröffentlichung.
+- [x] Check baseline: ack-team reports missing agents, rules and settings; 95 unittest tests pass.
+- [x] Read existing ticket: k5 concerns binaries, not setup.
+- [x] Install sources and house rules with skilletor, using the existing local sources.
+- [x] Move project knowledge to `briefing-core` and references; write five agents and short rules.
+- [x] Reduce CLAUDE.md to an entry point and specific pointers; ignore local files and root karr materialization.
+- [x] Run `skilletor check --scope project`, `ack-team check` and both doctors with no missing skills.
+- [x] Check positive hook output per role and a negative probe agent.
+- [x] Check Markdown pointers, Git visibility and `git diff --check`.
+- [x] Run `python3 -m unittest discover tests`; expected: 95 passing tests.
+- [x] Review results and name unexecuted live/platform checks; no publication in the initial scope.
 
-## Ausführungsnotizen
+## Execution notes
 
-- Entscheidung: direkt im bestehenden Checkout arbeiten, wie für die Teameinrichtung genehmigt; keine Produktcode-Änderung und kein Commit.
-- Entscheidung: Konfigurationsmigration mit vorhandenen Prüfwerkzeugen statt neuer Produkt-Tests; die rote Ausgangslage ist der fehlgeschlagene Team-Check.
-- Entscheidung: `targets: [claude]` bildet das vorhandene Entwicklungssetup ab; kein zweites Codex-Team ohne Auftrag.
-- Entscheidung: `skilletor check` darf bei den lokalen Quellen `changed` melden. Der installierte `LocalSource.check()` liefert absichtlich immer `true`; bestanden sind ein unverändernder Sync und acht installierte Einträge ohne Orphans, Warnungen oder Trust-Anfragen. Kein Eingriff in die Benutzerkonfiguration, um einen künstlich grünen Exit zu erzwingen.
-- Korrigierte Prüfannahmen: `bin/briefing-doctor` ist ein Shell-Wrapper (`sh -n`), kein Python-Skript. Der erste Compile-Versuch darauf schlug entsprechend fehl. Der installierte Hook injiziert erst bei `SubagentStart`, der Checkout noch über `PreToolUse.updatedInput`; ein gemeinsamer Positivtest mit dem alten Event war deshalb ungeeignet. Beide Verträge wurden anschließend getrennt erfolgreich geprüft.
+- Ruling: work directly in the existing checkout as approved for team setup; no production-code changes or commit in the initial scope.
+- Ruling: verify the configuration migration with existing tools rather than new product tests; the failing team check is the red baseline.
+- Ruling: `targets: [claude]` reflects the existing development setup; do not create a second Codex team without a request.
+- Ruling: `skilletor check` may report `changed` for local sources. The installed `LocalSource.check()` intentionally always returns true. An unchanged sync and eight installed entries without orphans, warnings or trust requests are the relevant evidence; do not alter user configuration to force a green exit.
+- Corrected verification assumptions: `bin/briefing-doctor` is a shell wrapper (`sh -n`), not Python. The initial compile attempt failed accordingly. At setup time the installed hook injected at `SubagentStart`, while the checkout used `PreToolUse.updatedInput`; one positive test using the old event was inappropriate. Both contracts subsequently passed separate checks.
 
-## Verifiziert
+## Verified at setup time
 
-- `ack-team check`: alle fünf Agenten, Rollen, Lesebeschränkungen, Settings, Board und Hook `ok`.
-- Checkout-Doctor und installierter `briefing-doctor`: alle fünf Rollen auflösbar; maximal 28 KiB Briefing.
-- Je Hook-Version fünf positive Payload-Tests; fehlender Skill wird verweigert, kein Teil-Briefing. Installierter SubagentStart liefert bei fehlendem Skill ausschließlich Abbruchkontext.
-- Relative Markdown-Verweise erreichbar; eigene Quellen nicht ignoriert, installierte und lokale Dateien ignoriert; Karr-Ignore nur im Root.
-- Python-Syntaxprüfung der beiden Hooks und `sh -n bin/briefing-doctor` bestanden.
-- `python3 -m unittest discover tests`: 95 Tests bestanden, keine übersprungen.
-- `git diff --check` bestanden; keine Produktdateien verändert, kein Commit, Push oder Board-Schreibzugriff.
+- `ack-team check`: all five agents, roles, read-only restrictions, settings, board and hook passed.
+- Checkout and installed doctors: all five roles resolve; largest briefing 28 KiB.
+- Five positive payload tests per hook version; missing skills denied without partial context. Installed SubagentStart returned abort context only on failure.
+- Relative Markdown pointers resolve; owned sources are trackable, installed/local files ignored; karr ignore patterns are root-anchored.
+- Python syntax checks for both hooks and `sh -n bin/briefing-doctor` passed.
+- `python3 -m unittest discover tests`: 95 tests passed, none skipped.
+- `git diff --check` passed; no product-file changes or board writes during setup.
 
-## Offen beziehungsweise nicht ausgeführt
+## Follow-up and remaining verification
 
-- Der erste Reviewer-Start war noch mit „Agent type not found“ abgelehnt worden. Nach Freigabe des lokalen Commits durch den Nutzer war `briefing-reviewer` verfügbar: unabhängiges Review ohne Befunde, 95/95 Tests, beide Doctors, alle fünf Rollen über beide Hook-Kanäle und ack-team bestanden. Keine Datei- oder Board-Mutationen durch den Reviewer. Der reale Verhaltenstest mit Kontrollagent steht weiterhin aus.
-- Echte Claude-Code-/Codex-Spawns mit Positiv-/Kontrollphrase und native Windows-/macOS-Läufe nicht ausgeführt. Erfolgreiche Payload-Tests sind kein Ersatz für diese Integrationsnachweise.
+- The first reviewer spawn was rejected with "Agent type not found". After the user authorized the local commit, `briefing-reviewer` became available: independent review found no issues; 95/95 tests, both doctors, both hook channels for all five roles and ack-team passed. The reviewer changed no files or board state. The behavioral control-agent test remained outstanding.
+- Real Claude Code/Codex spawns with secret/control phrases and native Windows/macOS runs were not executed for this setup task. Passing payload tests are not a substitute.

@@ -7,22 +7,30 @@ that nothing on the developer's machine leaks into the test sandbox.
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+
+from cli_driver import command_for
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "briefing-preload"
 
 
 def run_hook(payload, *, fake_home):
-    env = {**os.environ, "HOME": str(fake_home)}
+    env = {
+        **os.environ,
+        "HOME": str(fake_home),
+        "PYTHONIOENCODING": "utf-8",
+    }
     proc = subprocess.run(
-        ["python3", str(HOOK)],
+        command_for("hook", ["python3", str(HOOK)]),
         input=json.dumps(payload),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         timeout=10,
     )
@@ -171,14 +179,72 @@ class BriefingHookTests(unittest.TestCase):
 
     def test_garbage_stdin_is_noop(self):
         proc = subprocess.run(
-            ["python3", str(HOOK)],
+            command_for("hook", ["python3", str(HOOK)]),
             input="this is not json",
             capture_output=True,
             text=True,
-            env={**os.environ, "HOME": str(self.home)},
+            encoding="utf-8",
+            env={
+                **os.environ,
+                "HOME": str(self.home),
+                "PYTHONIOENCODING": "utf-8",
+            },
         )
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout, "")
+
+    def test_hook_helper_decodes_utf8_under_ascii_parent_locale(self):
+        tests_dir = Path(__file__).resolve().parent
+        script = textwrap.dedent(
+            f'''\
+            import json
+            import os
+            import tempfile
+            from pathlib import Path
+
+            import sys
+            sys.path.insert(0, {str(tests_dir)!r})
+            from test_briefing import run_hook
+
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                emitter = root / "utf8-emitter.py"
+                newline = chr(10)
+                emitter.write_text(newline.join((
+                    "import sys",
+                    "sys.stdout.write(chr(123) + chr(125))",
+                    "sys.stderr.write(chr(0x00E4) + chr(0x6280) + chr(0x80FD))",
+                )) + newline, encoding="ascii")
+                os.environ["BRIEFING_TEST_CLI"] = json.dumps([sys.executable, str(emitter)])
+                result = run_hook(dict(), fake_home=root)
+                expected = chr(0x00E4) + chr(0x6280) + chr(0x80FD)
+                assert result.returncode == 0
+                assert result.stderr == expected
+            print("ok")
+            '''
+        )
+        env = {
+            **os.environ,
+            "LC_ALL": "C",
+            "LANG": "C",
+            "PYTHONCOERCECLOCALE": "0",
+            "PYTHONUTF8": "0",
+            "PYTHONPATH": str(tests_dir),
+        }
+        env.pop("PYTHONIOENCODING", None)
+        env.pop("BRIEFING_TEST_CLI", None)
+
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=10,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, "ok\n")
 
     # --- frontmatter parsing -------------------------------------------
 
@@ -222,6 +288,38 @@ class BriefingHookTests(unittest.TestCase):
         self.assertIn('<skill name="bar"', prompt)
         self.assertIn('<skill name="baz"', prompt)
 
+    def test_quoted_zero_agent_and_skill_names_are_not_treated_as_empty(self):
+        write(self.cwd / ".claude/agents/zero.md", """
+            ---
+            name: "0"
+            briefing:
+              skills:
+                - "0"
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/0/SKILL.md", "ZERO SKILL BODY\n")
+
+        proc = run_hook(self._payload(agent_type="0"), fake_home=self.home)
+
+        self.assertEqual(proc.returncode, 0)
+        prompt = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn('<skill name="0"', prompt)
+        self.assertIn("ZERO SKILL BODY", prompt)
+
+    def test_skill_crlf_fixture_uses_universal_newlines(self):
+        self._declare("crlf")
+        skill = self.cwd / ".claude/skills/crlf/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_bytes(b"CRLF-ONE\r\nCRLF-TWO\rCRLF-THREE\r\n")
+
+        proc = run_hook(self._payload(), fake_home=self.home)
+
+        self.assertEqual(proc.returncode, 0)
+        prompt = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("CRLF-ONE\nCRLF-TWO\nCRLF-THREE", prompt)
+        self.assertNotIn("\r", prompt)
+
     def test_briefing_block_coexists_with_other_frontmatter(self):
         write(self.cwd / ".claude/agents/demo.md", """
             ---
@@ -260,6 +358,22 @@ class BriefingHookTests(unittest.TestCase):
         prompt = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("PROJECT FOO", prompt)
         self.assertNotIn("USER FOO", prompt)
+
+    def test_user_skill_resolves_from_unicode_home(self):
+        unicode_home = self.root / "home-ä-技能"
+        unicode_home.mkdir()
+        self._declare("user-skill")
+        skill = unicode_home / ".claude/skills/user-skill/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("UNICODE HOME USER BODY\n", encoding="utf-8")
+
+        proc = run_hook(self._payload(), fake_home=unicode_home)
+
+        self.assertEqual(proc.returncode, 0)
+        prompt = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        skill_dir = os.path.abspath(unicode_home / ".claude/skills/user-skill")
+        self.assertIn("UNICODE HOME USER BODY", prompt)
+        self.assertIn('<skill name="user-skill" dir="%s">' % skill_dir, prompt)
 
     def test_user_beats_plugin(self):
         self._declare("foo")
@@ -354,6 +468,37 @@ class BriefingHookTests(unittest.TestCase):
                        skills={"skills/tool": "HERE"},
                        scope="project", project=self.cwd)
         self.assertIn("HERE", self._briefed())
+
+    @unittest.skipIf(os.name == "nt", "Backslash is a path separator on Windows.")
+    def test_project_scoped_plugin_does_not_treat_posix_backslash_as_separator(self):
+        scoped_project = self.root / "a"
+        sibling = self.root / r"a\b"
+        scoped_project.mkdir()
+        sibling.mkdir()
+        write(sibling / ".claude/agents/demo.md", """
+            ---
+            briefing:
+              skills:
+                - somepl:tool
+            ---
+            body
+        """)
+        install_plugin(
+            self.home,
+            "somepl",
+            skills={"skills/tool": "SCOPED PLUGIN BODY"},
+            scope="project",
+            project=scoped_project,
+        )
+
+        proc = run_hook(
+            self._payload(cwd=str(sibling)), fake_home=self.home
+        )
+
+        self.assertEqual(proc.returncode, 0)
+        context = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("FAILED", context)
+        self.assertNotIn("SCOPED PLUGIN BODY", context)
 
     # --- plugin enablement ---------------------------------------------
 
@@ -581,6 +726,64 @@ class BriefingHookTests(unittest.TestCase):
         write(self.cwd / ".claude/skills/foo/SKILL.md", "NESTED")
         out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
         self.assertIn("NESTED", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_unicode_named_agent_file_is_found_by_declaration(self):
+        unicode_cwd = self.root / "project-ä-技能"
+        unicode_cwd.mkdir()
+        write(unicode_cwd / ".claude/agents/技能.md", """
+            ---
+            name: fallback-agent
+            briefing:
+              skills:
+                - fallback-skill
+            ---
+            body
+        """)
+        write(
+            unicode_cwd / ".claude/skills/fallback-skill/SKILL.md",
+            "UNICODE AGENT ENTRY BODY\n",
+        )
+
+        proc = run_hook(
+            self._payload(cwd=str(unicode_cwd), agent_type="fallback-agent"),
+            fake_home=self.home,
+        )
+
+        self.assertEqual(proc.returncode, 0)
+        self.assertTrue(proc.stdout, proc.stderr)
+        prompt = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("UNICODE AGENT ENTRY BODY", prompt)
+
+    def test_current_directory_duplicate_agent_wins_over_nested_agent(self):
+        write(self.cwd / ".claude/agents/z-role.md", """
+            ---
+            name: duplicate-agent
+            briefing:
+              skills:
+                - root-skill
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/agents/a-team/role.md", """
+            ---
+            name: duplicate-agent
+            briefing:
+              skills:
+                - nested-skill
+            ---
+            body
+        """)
+        write(self.cwd / ".claude/skills/root-skill/SKILL.md", "ROOT AGENT BODY\n")
+        write(self.cwd / ".claude/skills/nested-skill/SKILL.md", "NESTED AGENT BODY\n")
+
+        proc = run_hook(
+            self._payload(agent_type="duplicate-agent"), fake_home=self.home
+        )
+
+        self.assertEqual(proc.returncode, 0)
+        prompt = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("ROOT AGENT BODY", prompt)
+        self.assertNotIn("NESTED AGENT BODY", prompt)
 
     def test_file_named_after_agent_but_named_otherwise_is_not_it(self):
         write(self.cwd / ".claude/agents/demo.md", """

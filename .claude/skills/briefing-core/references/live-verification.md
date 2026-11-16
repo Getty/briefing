@@ -1,98 +1,98 @@
-# Echte Harness-Integration prüfen
+# Verify real harness integration
 
-Subprozess-Tests beweisen „Payload → Ausgabe“, nicht „Harness ruft Hook auf und
-übergibt den Kontext“. Ein Integrationstest muss so gebaut sein, dass er ohne
-Briefing nicht versehentlich bestehen kann.
+Subprocess tests prove “payload → output,” not “the harness calls the hook and
+passes the context.” An integration test must be constructed so it cannot
+accidentally pass without briefing.
 
-## Positivprobe und Kontrolle
+## Positive test and control
 
-1. Eine Testphrase ausschließlich in den Body eines Test-Skills schreiben.
-   Weder Prompt noch Agentenbeschreibung nennen die Phrase oder verraten sie.
-2. Den deklarierenden Agenten bitten, sie aus seinem bereits vorhandenen Kontext
-   zu produzieren, ohne Dateien oder den Skill nachzuladen.
-3. Denselben Agenten ohne `briefing.skills` beziehungsweise ohne
-   `# briefing: skills = [...]` als Kontrolle starten. Erwartet: `UNKNOWN`.
-4. Tool-Aufrufe und tatsächlichen Hook-Austausch mitprüfen. Ein Agent, der die
-   Datei selbst liest, beweist keine Injektion. Ein „Ist Phrase X im Kontext?“
-   im Prompt verrät die Antwort und ist kein Test.
-5. Bei Claude Code zusätzlich den unveränderten `Agent`-Prompt nachweisen und
-   einen Agenten mit unbekanntem Skill prüfen: der `PreToolUse`-Guard muss ihn
-   verweigern, während der erfolgreiche Spawn sein Briefing erst bei
-   `SubagentStart` über `additionalContext` erhält.
+1. Write a test phrase exclusively into the body of a test skill.
+   Neither prompt nor agent description names or reveals the phrase.
+2. Ask the declaring agent to produce it from context it already has, without
+   reading files or loading the skill.
+3. Start the same agent without `briefing.skills` or without
+   `# briefing: skills = [...]` as the control. Expected: `UNKNOWN`.
+4. Check tool calls and the actual hook exchange. An agent that reads the file
+   itself does not prove injection. “Is phrase X in the context?” in the prompt
+   reveals the answer and is not a test.
+5. For Claude Code, also prove the unmodified `Agent` prompt and test an agent
+   with an unknown skill: the `PreToolUse` guard must deny it, while the
+   successful spawn receives its briefing only through `additionalContext` at
+   `SubagentStart`.
 
-Eine verlockende Skill-Beschreibung kann die Kontrolle zum Nachlesen bringen:
-Name und Beschreibung sind auch ohne injizierten Body sichtbar.
+A tempting skill description can cause the control to read the file:
+name and description are visible without an injected body.
 
-## Codex: zwei getrennte Vertrauensentscheidungen
+## Codex: two separate trust decisions
 
-- Plugin-Hooks laufen erst nach erteiltem Hook-Vertrauen. Vorher werden sie
-  still übersprungen. `codex exec` kann dieses Vertrauen nicht interaktiv erteilen;
-  für einen ausdrücklich genehmigten Integrationstest gibt es
-  `--dangerously-bypass-hook-trust`.
-- Das Projekt muss separat vertraut sein, sonst lädt Codex keine Projektrollen
-  und spawnt `default`. Vertrauen auf `$HOME` deckt ein darunter liegendes,
-  separates Git-Repository nicht ab. Die Hook-Ausnahme löst das nicht.
-- Pro Lauf funktioniert `-c 'projects={"<abs path>"={trust_level="trusted"}}'`.
-  Die gepunktete Form `projects."<path>".trust_level=...` wurde im verifizierten
-  Codex-Stand still ignoriert. Das protokollierte `agent_type` unterscheidet
-  einen falschen Default-Agenten von einem fehlgeschlagenen Briefing.
-- Immer das echte `CODEX_HOME` verwenden, andere Testeinstellungen über `-c`.
-  **Niemals `auth.json` in ein zweites Home kopieren:** parallele Homes mit
-  demselben Refresh-Token können den Login ungültig machen.
+- Plugin hooks run only after hook trust has been granted. Before then, they are
+  skipped silently. `codex exec` cannot grant that trust interactively;
+  `--dangerously-bypass-hook-trust` is available for an explicitly approved
+  integration test.
+- The project must be trusted separately; otherwise Codex loads no project roles
+  and spawns `default`. Trust in `$HOME` does not cover a separate Git repository
+  beneath it. The hook exception does not change this.
+- Per run, use `-c 'projects={"<abs path>"={trust_level="trusted"}}'`.
+  The dotted form `projects."<path>".trust_level=...` was silently ignored in
+  the verified Codex version. The logged `agent_type` distinguishes a wrong
+  default agent from failed briefing.
+- Always use the real `CODEX_HOME`; pass other test settings through `-c`.
+  **Never copy `auth.json` into a second home:** parallel homes with the same
+  refresh token can invalidate the login.
 
-## Beobachtbarkeit und installierter Stand
+## Observability and installed version
 
-`codex exec` verwirft Hook-`systemMessage` auch mit `--json`; die TUI zeigt sie
-als Warnung. Fehlende sichtbare Ausgabe ist daher kein Beleg für einen fehlenden Hook.
-Wenn Instrumentierung nötig ist, nach Freigabe die tatsächlich installierte
-Cache-Kopie sichern und deren stdin/stdout protokollieren; danach wiederherstellen.
-Eine Markierung allein im Repository beweist nichts über das installierte Plugin.
-Keine Auth-Dateien, Umgebungs-Secrets oder unnötigen Projektinhalte protokollieren.
+`codex exec` discards hook `systemMessage` even with `--json`; the TUI shows it
+as a warning. Missing visible output is therefore not evidence of a missing hook.
+When instrumentation is necessary, after approval save the actually installed
+cache copy and log its stdin/stdout; then restore it.
+A marker in the repository alone proves nothing about the installed plugin.
+Do not log auth files, environment secrets, or unnecessary project content.
 
-Claude Code kann den Checkout mit `claude -p --permission-mode auto --plugin-dir <checkout>`
-testen. Eine parallel installierte briefing-Kopie für diesen Lauf mit
-`--settings '{"enabledPlugins":{"briefing@getty":false}}'` deaktivieren,
-damit der Test nicht zweimal beziehungsweise gegen die falsche Version läuft.
-Den tatsächlich geladenen Hook-Pfad und die Plugin-/Harness-Version festhalten;
-keine feste Reihenfolge „Checkout älter, Installation neuer“ voraussetzen.
-Ein erfolgreicher Guard oder Doctor beweist keine `SubagentStart`-Unterstützung
-älterer Harnesses; siehe Legacyharness-Falle im [Hook-Vertrag](hook-contract.md).
-Neue Agentendateien verlangen eine neue Sitzung; Doctor-/Hook-Simulationen bleiben
-auch ohne Neustart möglich. Einen solchen Check nicht als echten Spawn ausgeben.
+Claude Code can test the checkout with
+`claude -p --permission-mode auto --plugin-dir <checkout>`.
+Disable a parallel installed briefing copy for this run with
+`--settings '{"enabledPlugins":{"briefing@getty":false}}'`,
+so the test does not run twice or against the wrong version.
+Record the hook path actually loaded and the plugin/harness version;
+do not assume a fixed ordering such as “checkout older, installation newer.”
+A successful guard or Doctor does not prove `SubagentStart` support in older
+harnesses; see the legacy-harness caveat in the [hook contract](hook-contract.md).
+New agent files require a new session; Doctor/hook simulations remain possible
+without restarting. Do not present such a check as a real spawn.
 
-## Historische Evidenz, keine aktuelle Prüfaussage
+## Historical evidence, not a current verification claim
 
-Die Upstream-CLAUDE.md hielt folgende Läufe fest; sie wurden bei dieser
-Dokumentationsmigration nicht erneut ausgeführt:
+The upstream CLAUDE.md recorded the following runs; they were not rerun during
+this documentation migration:
 
-- Codex 0.153.4: abweichender Dateiname unter `agents/team/`, Spawn aus einem
-  Repository-Unterverzeichnis und eine `config_file`-Rolle lieferten die Phrase;
-  die Kontrolle lieferte `UNKNOWN`.
-- briefing 0.4.0 (vor der Claude-Code-Migration auf `SubagentStart`): Codex nannte
-  das injizierte `<skill>`-Element; ein protokollierter SessionStart meldete die
-  kaputte Deklaration. Claude Code fand einen Agenten nach `name` in einem
-  Unterverzeichnis, lieferte die Phrase ohne Tool-Aufruf, die Kontrolle `UNKNOWN`;
-  Audit und Pre-flight erschienen damals als Systemmeldungen.
-- Claude Code 2.1.318, Migration auf `SubagentStart` (briefing k5):
-  `claude -p --permission-mode auto --plugin-dir <checkout>` mit deaktivierter
-  installierter Kopie. Ein roher Probe-Hook belegte `agent_type` = Agenten-`name`
-  und die Übernahme von `additionalContext` mit `additionalContextLimit: 0`.
-  Mit briefing lieferte der deklarierende Agent die Phrase; sein einziger
-  Tool-Aufruf war die Rückgabe an den Auftraggeber, kein Skill-/Dateinachladen.
-  Die identische Kontrolle ohne Deklaration antwortete `UNKNOWN`.
-  Ein unbekannter Skill wurde mit `PreToolUse:Agent hook error: briefing: agent
-  'broken' references unknown skill(s): no-such-skill` abgewiesen.
-  Der `Agent`-Prompt kam unverändert an.
-  **Grenzen:** Auch das alte Prompt-Rewrite wurde im headless-auto-mode-Lauf
-  nicht verweigert; die ursprünglich aus interaktiven Sitzungen gemeldete
-  AutoModeRefusal wurde also nicht reproduziert. `claude -p` zeigte keine
-  `SubagentStart`-`systemMessage` im Stream; die Audit-Anzeige in der TUI blieb
-  unbewiesen.
-- Der ursprüngliche Codex-Vergleich protokollierte `SubagentStart` in beiden
-  Läufen; nur der deklarierende Agent kannte die Phrase.
-- Ein gemeinsames `hooks.json` wurde mit Claude Code geprüft: der zusätzliche
-  SubagentStart-Block war akzeptiert, absichtlich kaputtes JSON lieferte dagegen
-  `Failed to load hooks`.
+- Codex 0.153.4: a differing file name under `agents/team/`, spawning from a
+  repository subdirectory, and a `config_file` role produced the phrase;
+  the control produced `UNKNOWN`.
+- briefing 0.4.0 (before Claude Code migrated to `SubagentStart`): Codex named
+  the injected `<skill>` element; a logged SessionStart reported the broken
+  declaration. Claude Code found an agent by `name` in a subdirectory, produced
+  the phrase without a tool call, and the control produced `UNKNOWN`;
+  audit and pre-flight appeared as system messages at that time.
+- Claude Code 2.1.318, migration to `SubagentStart` (briefing k5):
+  `claude -p --permission-mode auto --plugin-dir <checkout>` with the installed
+  copy disabled. A raw probe hook established `agent_type` = agent `name` and
+  adoption of `additionalContext` with `additionalContextLimit: 0`.
+  With briefing, the declaring agent produced the phrase; its only tool call
+  was returning to the requester, with no skill or file loading.
+  The identical control without a declaration answered `UNKNOWN`.
+  An unknown skill was denied with `PreToolUse:Agent hook error: briefing: agent
+  'broken' references unknown skill(s): no-such-skill`.
+  The `Agent` prompt arrived unchanged.
+  **Limits:** The old prompt rewrite was also not denied in the headless-auto-mode
+  run; the AutoModeRefusal originally reported from interactive sessions was
+  therefore not reproduced. `claude -p` showed no `SubagentStart`
+  `systemMessage` in the stream; audit display in the TUI remained unproven.
+- The original Codex comparison logged `SubagentStart` in both runs; only the
+  declaring agent knew the phrase.
+- A shared `hooks.json` was tested with Claude Code: the additional
+  SubagentStart block was accepted, while deliberately broken JSON instead
+  produced `Failed to load hooks`.
 
-Diese Befunde begründen die Teststrategie. Aktuelle Plattform-/Harness-Ergebnisse
-müssen erneut ausgeführt werden; nicht verfügbare Läufe ausdrücklich auslassen.
+These findings justify the test strategy. Current platform/harness results
+must be rerun; explicitly omit unavailable runs.
