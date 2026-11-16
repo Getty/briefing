@@ -9,6 +9,7 @@ permissions:
 jobs:
   simpici:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -19,6 +20,7 @@ jobs:
 
   perl-distribution:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -71,6 +73,7 @@ jobs:
             distribution: strawberry
             label: windows
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     name: Installed distribution / ${{ matrix.label }} / Perl ${{ matrix.perl-version }}
     env:
       PERL_CPANM_OPT: --mirror https://cpan.metacpan.org --mirror-only
@@ -100,8 +103,9 @@ jobs:
           prefix="$GITHUB_WORKSPACE/.ci-install"
           cpanm --notest --installdeps --local-lib-contained "$prefix" "${archives[0]}"
           cpanm --local-lib-contained "$prefix" "${archives[0]}"
-      - name: Install and test with native Windows Perl
+      - name: Install dependencies with native Windows Perl
         if: runner.os == 'Windows'
+        timeout-minutes: 15
         # Git Bash would prepend its own incomplete Perl to PATH.
         shell: pwsh
         run: |
@@ -111,9 +115,27 @@ jobs:
           if ($archives.Count -ne 1) { throw 'Expected exactly one source archive' }
           $archive = $archives[0].FullName
           $prefix = "$env:GITHUB_WORKSPACE/.ci-install"
-          cpanm --notest --installdeps --local-lib-contained "$prefix" "$archive"
+          # Closed stdin: nothing in the build may wait for input.
+          $null | cpanm --verbose --notest --installdeps --local-lib-contained "$prefix" "$archive"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cpanm --local-lib-contained "$prefix" "$archive"
+      - name: Diagnose the Windows test run verbosely
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        # Names the test that hangs; the step timeout cancels it.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:PERL5LIB = "$env:GITHUB_WORKSPACE/.ci-install/lib/perl5"
+          $null | prove -lr -v --timer t
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test and install with native Windows Perl
+        if: runner.os == 'Windows'
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $archive = @(Get-ChildItem .ci-dist/App-Briefing-*.tar.gz)[0].FullName
+          $prefix = "$env:GITHUB_WORKSPACE/.ci-install"
+          $null | cpanm --verbose --local-lib-contained "$prefix" "$archive"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Select and verify the installed library and CLI
         shell: python

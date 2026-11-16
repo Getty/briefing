@@ -10,7 +10,7 @@ use File::Temp ();
 use IPC::Open3 qw( open3 );
 use JSON::MaybeXS qw( decode_json );
 use Path::Tiny qw( path );
-use Symbol qw( gensym );
+use POSIX qw( WNOHANG );
 use if $^O eq 'MSWin32', 'Win32::LongPath', qw( mkdirL openL testL );
 
 our @EXPORT_OK = qw(
@@ -151,26 +151,60 @@ sub run_cli {
   chdir $box->{cwd}
     or croak 'cannot chdir to '.$box->{cwd}.': '.$!;
 
-  my ( $in, $out );
-  my $err = gensym;
-  my ( $stdout, $stderr, $pid, $wait_status );
+  # stdin/stdout/stderr go through temp files, never pipes: a pipe whose
+  # write end leaks into another process never delivers EOF on Windows, and
+  # reading stdout to EOF before stderr can deadlock. The child is also
+  # killed after a timeout so a hang fails the test instead of the build.
+  my $timeout = defined $args{timeout} ? $args{timeout} : 60;
+  my $dir = File::Temp->newdir(CLEANUP => 1);
+  my $in_file  = path($dir, 'stdin');
+  my $out_file = path($dir, 'stdout');
+  my $err_file = path($dir, 'stderr');
+  $in_file->spew_raw($input);
+
+  my ( $stdout, $stderr, $wait_status, $timed_out );
   my $ok = eval {
-    $pid = open3($in, $out, $err, @{$argv});
-    print {$in} $input
-      or croak 'cannot send CLI input: '.$!;
-    close $in
-      or croak 'cannot close CLI input: '.$!;
-    local $/;
-    $stdout = <$out> // '';
-    $stderr = <$err> // '';
-    waitpid($pid, 0);
+    open my $in, '<', $in_file->stringify
+      or croak 'cannot open CLI stdin file: '.$!;
+    open my $out, '>', $out_file->stringify
+      or croak 'cannot open CLI stdout file: '.$!;
+    open my $err, '>', $err_file->stringify
+      or croak 'cannot open CLI stderr file: '.$!;
+    binmode $_ for $in, $out, $err;
+
+    my $pid = open3(
+      '<&'.fileno($in), '>&'.fileno($out), '>&'.fileno($err),
+      @{$argv},
+    );
+    close $in;
+    close $out;
+    close $err;
+
+    my $deadline = time + $timeout;
+    my $reaped;
+    while (1) {
+      $reaped = waitpid($pid, WNOHANG);
+      last if $reaped == $pid || $reaped == -1;
+      if (time >= $deadline) {
+        $timed_out = 1;
+        kill 'KILL', $pid;
+        waitpid($pid, 0);
+        last;
+      }
+      select undef, undef, undef, 0.05;
+    }
     $wait_status = $?;
+    $stdout = $out_file->slurp_raw;
+    $stderr = $err_file->slurp_raw;
     1;
   };
   my $error = $@;
   chdir $original_cwd
     or croak 'cannot restore cwd to '.$original_cwd.': '.$!;
   croak $error unless $ok;
+  croak 'run_cli: timed out after '.$timeout.'s: '.join(' ', @{$argv})
+    .(length $stderr ? "\nstderr so far: ".$stderr : '')
+    if $timed_out;
 
   return {
     stdout    => $stdout,
