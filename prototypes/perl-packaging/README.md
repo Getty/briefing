@@ -80,9 +80,23 @@ vorhandene Module einpacken; die Größe ist keine Reproduzierbarkeitsgarantie.
 [Zweiter nativer Lauf](https://github.com/Getty/briefing/actions/runs/43799294737):
 Linux und macOS bestehen alle Smoke-Prüfungen; Windows baut und startet die EXE,
 meldet aber eine vorhandene Datei unter `Pfad ä 技能` als `missing_skill`.
-Eine ergänzende Diagnose vergleicht ASCII-, Umlaut- und CJK-Pfade jeweils mit dem
-ungepackten Skript und dem Binary. Sie ersetzt den strengen Smoke-Test nicht;
-Fehler bleiben Fehler.
+Die ergänzende [native Gegenprobe](https://github.com/Getty/briefing/actions/runs/43800137154)
+vergleicht ASCII-, Umlaut- und CJK-Pfade mit unverändertem Code:
+
+| Windows-Dateipfad | Ungepacktes Skript | PAR-Binary |
+|---|---|---|
+| ASCII | PASS | PASS |
+| `Grüße` | FAIL: `missing_skill` | FAIL: `missing_skill` |
+| `技能` | FAIL: `missing_skill` | FAIL: `missing_skill` |
+
+Alle sechs Prozesse starten und liefern reines JSON mit Exit 0. Auf ASCII-Pfaden
+wird derselbe Unicode-Dateiinhalt korrekt gelesen. Die Dateien existieren nach
+Anlage durch den Testhost; der Prototyp scheitert an seiner `-f`-Prüfung vor
+`Path::Tiny->slurp_utf8`. Der Fehler ist somit bereits im ungepackten Windows-
+Dateizugriff vorhanden, nicht erst nach PAR-Verpackung. Eine Portierung braucht
+hier eine ausdrücklich Unicode-fähige Lösung; dieser Versuch repariert sie nicht.
+Die Diagnose ersetzt den strengen Smoke-Test nicht: dessen Windows-FAIL bleibt
+auch im letzten CI-Lauf bestehen, während Linux und macOS erneut PASS melden.
 
 Der erste Windows-Versuch scheiterte noch vor dem Build: Git Bash stellte sein
 eigenes `/usr/bin/perl` vor Strawberry Perl. Der korrigierte Workflow verwendet
@@ -145,9 +159,12 @@ CI-Läufe wurden tatsächlich ausgeführt. Die Build-/Testhelfer selbst pushen o
 starten keine CI.
 
 Fazit: Der native Build funktioniert auf allen drei getesteten x86_64-Plattformen.
-Linux und macOS bestehen den Funktions-Smoke; unter Windows blockieren Unicode-
-Dateipfade die Eignung dieses unveränderten Prototyps. Nur für die separate lokale
-Linux-Umgebung ist zusätzlich das Fehlen externer Interpreter nachgewiesen.
+Linux und macOS bestehen den Funktions-Smoke; unter Windows blockieren bereits
+Umlaut-Dateipfade die Eignung dieses unveränderten Prototyps, sowohl ungepackt als
+auch paketiert. Nur für die separate lokale Linux-Umgebung ist zusätzlich das
+Fehlen externer Interpreter nachgewiesen. ARM, eine native Umgebung ohne externes
+Perl auf macOS/Windows und echte Harness-Integration bleiben ungeprüft.
 Für einen winzigen Hook sind Archiv-/Startkosten und die Cache-Extraktion relevant:
 die Anwendung liest nur, der PAR-Launcher schreibt beim Erststart dagegen Dateien.
 Das ist noch keine Freigabe für eine vollständig portable, strikt lesende Hook-Auslieferung.
+Der Versuch endet bei diesen Befunden; Modulname und produktive Umsetzung bleiben offen.
