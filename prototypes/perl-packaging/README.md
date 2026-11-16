@@ -71,16 +71,37 @@ vorhandene Module einpacken; die Größe ist keine Reproduzierbarkeitsgarantie.
 
 ## Zielmatrix mit getrennten Statusfeldern
 
-| Ziel | Geplanter nativer CI-Runner | Tatsächlich getestet | Build / Funktions-Smoke | Ohne separates Perl |
+| Ziel | Nativer CI-Runner | Tatsächlich getestet | Build / Funktions-Smoke | Ohne separates Perl |
 |---|---|---|---|---|
-| Linux | ubuntu-24.04, x86_64 | lokal x86_64, glibc 2.41 | Lokal PASS; CI NICHT GELAUFEN | Separate Hauptsitzungs-Isolation PASS, Details unten |
-| macOS | macos-15-intel, x86_64 | NICHT GELAUFEN | Nur vorbereitet | NICHT BELEGT |
-| Windows | windows-2022, x86_64 / Strawberry Perl | NICHT GELAUFEN | Nur vorbereitet | NICHT BELEGT |
+| Linux | ubuntu-24.04, x86_64 | CI: glibc 2.39; lokal: glibc 2.41 | PASS / PASS | Separate lokale Isolation PASS, Details unten |
+| macOS | macos-15-intel, x86_64 | nativer Intel-Runner, Darwin 24.6 | PASS / PASS | NICHT BELEGT: Host-Test mit leerem PATH |
+| Windows | windows-2022, x86_64 / Strawberry Perl | nativer Windows-Server-2022-Runner | Build PASS; Smoke FAIL bei Unicode-Dateipfad | NICHT BELEGT |
 
-Hier wurde ausschließlich Linux x86_64 ausgeführt. Keine Aussage über ARM,
-Cross-Compilation, ältere libc, Unicode-Dateipfade auf Windows oder macOS.
+[Zweiter nativer Lauf](https://github.com/Getty/briefing/actions/runs/43799294737):
+Linux und macOS bestehen alle Smoke-Prüfungen; Windows baut und startet die EXE,
+meldet aber eine vorhandene Datei unter `Pfad ä 技能` als `missing_skill`.
+Eine ergänzende Diagnose vergleicht ASCII-, Umlaut- und CJK-Pfade jeweils mit dem
+ungepackten Skript und dem Binary. Sie ersetzt den strengen Smoke-Test nicht;
+Fehler bleiben Fehler.
+
+Der erste Windows-Versuch scheiterte noch vor dem Build: Git Bash stellte sein
+eigenes `/usr/bin/perl` vor Strawberry Perl. Der korrigierte Workflow verwendet
+unter Windows PowerShell, unter Linux/macOS weiterhin Bash.
+
+Keine Aussage über ARM, Cross-Compilation oder ältere Systembibliotheken.
 Der Workflow prüft RUNNER_ARCH; der Runner prüft platform.machine() und berichtet
 die eingebettete Perl-Architektur, statt das Runner-Label als Beweis zu nehmen.
+
+CI-Messwerte des zweiten Laufs, jeweils auf unterschiedlichen Hosts:
+
+| Ziel | Binary-Bytes | Erster leerer PAR-Cache | Median fünf warmer Starts |
+|---|---:|---:|---:|
+| Linux | 7.516.032 | 125,728 ms | 80,846 ms |
+| macOS | 6.950.067 | 848,640 ms | 221,138 ms |
+| Windows | 12.915.092 | nicht ausgewertet: Funktionsfehler | nicht ausgewertet |
+
+Das sind keine direkt vergleichbaren OS-Benchmarks. JSON-Prüfberichte liegen im
+CI-Lauf als kurzlebige Artefakte; es wurden keine Binaries veröffentlicht.
 
 Lokaler Stand: Perl 5.40.1, pp 1.064, Artefakt 9.758.529 Byte (etwa 9,31 MiB),
 208 Cachedateien / 16.197.654 Byte. Letzter Lauf mit erweitertem Unicode-Pfad:
@@ -119,10 +140,14 @@ Linux-Umgebung, nicht für alle Distributionen oder andere Betriebssysteme.
 Der Workflow läuft nach ausdrücklicher Freigabe manuell oder bei einem Push
 auf `spike/perl-packaging`, mit `contents: read`, nativen Builds und joblokalen
 CPAN-Abhängigkeiten. Er sichert ausschließlich JSON-Prüfberichte für sieben Tage;
-keine Binaries, Releases oder Änderungen an `main`. Native CI-Ergebnisse werden
-nach dem Lauf ergänzt. Die Build-/Testhelfer selbst pushen oder starten keine CI.
+keine Binaries, Releases oder Änderungen an `main`. Die oben verlinkten nativen
+CI-Läufe wurden tatsächlich ausgeführt. Die Build-/Testhelfer selbst pushen oder
+starten keine CI.
 
-Fazit: Die native Linux-Strecke funktioniert einschließlich des separat
-belegten Falls ohne installierten Interpreter. Für einen winzigen Hook sind
-Archiv- und Startkosten erheblich. Die Eignung auf drei Betriebssystemen bleibt
-bis zu den nativen macOS-/Windows-Läufen offen.
+Fazit: Der native Build funktioniert auf allen drei getesteten x86_64-Plattformen.
+Linux und macOS bestehen den Funktions-Smoke; unter Windows blockieren Unicode-
+Dateipfade die Eignung dieses unveränderten Prototyps. Nur für die separate lokale
+Linux-Umgebung ist zusätzlich das Fehlen externer Interpreter nachgewiesen.
+Für einen winzigen Hook sind Archiv-/Startkosten und die Cache-Extraktion relevant:
+die Anwendung liest nur, der PAR-Launcher schreibt beim Erststart dagegen Dateien.
+Das ist noch keine Freigabe für eine vollständig portable, strikt lesende Hook-Auslieferung.
