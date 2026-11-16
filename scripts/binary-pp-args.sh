@@ -61,5 +61,12 @@ if [ -n "$diag" ]; then
     print STDERR "DIAG-SSL: Net::SSLeay/IO::Socket::SSL not reached by ScanDeps\n" unless $found;
   ' 1>&2 || echo "DIAG-SSL: diagnosis failed (ignored)" >&2
 fi
+# Windows only: Strawberry Perl's Config.pm mentions Portable (portable-mode startup), which pp's
+# static scan follows into Portable::CPAN -> CPAN::Config -> LWP -> Net::SSLeay. None of that runs
+# in briefing, so exclude the chain (pp -X, --exclude=MODULE; given before the script, like the -M lines).
+case "$(perl -e 'print $^O')" in
+  MSWin32|msys|cygwin)
+    for x in Portable Portable::CPAN CPAN::Config Net::SSLeay IO::Socket::SSL; do printf -- '-X\n%s\n' "$x"; done ;;
+esac
 # One argument per line, never word-split (the bundle's rule for binary_pp_args).
 printf '%s\n' "$loaded" | while IFS= read -r m; do printf -- '-M\n%s\n' "$m"; done
