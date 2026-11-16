@@ -33,6 +33,10 @@ Revision history for briefing
   - The plugin hooks run through the starter (`bin/briefing hook EVENT`), and
     Codex reads its own `hooks/codex-hooks.json`; SessionStart may take up to 90
     seconds to provision the binary. Codex asks to trust the hooks once more.
+  - Windows: pass a working directory with characters outside the ANSI code
+    page by changing into it, not through `briefing --cwd`; Perl receives
+    command-line arguments in the ANSI code page there. Hook payloads are UTF-8
+    and not affected.
 
 0.5.3     2026-10-06 05:22:17Z
   - Windows: briefing runs without Git Bash. Each hook script has a small

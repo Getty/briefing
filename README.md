@@ -136,6 +136,11 @@ briefing --help
 briefing --version
 ```
 
+On Windows, pass a working directory whose path contains characters outside the ANSI
+code page by changing into it (`cd`), not through `--cwd`: Perl receives command-line
+arguments in the ANSI code page there. Hook payloads arrive as UTF-8 on stdin and are
+not affected.
+
 Library users can construct an explicit context and receive data rather than
 terminal output:
 

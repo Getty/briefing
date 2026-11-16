@@ -11,7 +11,7 @@
 #   exits 2; then, in an ASCII project and again in one whose directory and skill have
 #   non-ASCII names (Windows: the umlaut and CJK paths the packaging probe failed on, see
 #   docs/perl-direction.md point 1):
-#     doctor --tsv     (from the directory, then with --cwd DIR) exits 0 and reports agent, skill, settings and hook as ok;
+#     doctor --tsv     (from the directory, then with --cwd DIR; non-ASCII --cwd not on Windows) exits 0 and reports agent, skill, settings and hook as ok;
 #     doctor           exits 0;
 #     hook subagent-start   writes the briefing with the skill's marker text (a spawn is
 #                      briefed), exit 0;
@@ -62,6 +62,8 @@ bin nope >/dev/null 2>"$work/nope.err" || rc=$?
 [ "$rc" -eq 2 ] || fail "an unknown command exits $rc, want 2"
 echo "smoke error path: OK (unknown command, exit 2)"
 
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) on_windows=1 ;; *) on_windows= ;; esac
+
 # run_case LABEL DIRNAME SKILL
 run_case() {
   local label=$1 name=$2 skill=$3 dir ndir transcript rc out
@@ -107,20 +109,26 @@ run_case() {
   printf '%s\n' "$out" | grep -qF "$skill" || fail "$label: doctor --tsv (cwd) does not name the skill $skill"
   echo "smoke $label doctor --tsv (cwd): OK"
 
-  # doctor --cwd DIR takes the path from argv. Windows hands Perl an ANSI command line, so
-  # characters outside the code page arrive as '?': a known limit of argv, not of the hooks
-  # (their paths come as UTF-8 JSON on stdin, checked above).
-  rc=0
-  out=$(cd "$dir" && bin doctor --tsv --cwd "$ndir" 2>"$work/err") || rc=$?
-  [ "$rc" -eq 0 ] || fail "$label: doctor --tsv --cwd (argv) exits $rc: $out $(head -c 400 "$work/err")"
-  for what in agent skill settings hook; do
-    printf '%s\n' "$out" | grep -q "^$what	ok	" || fail "$label: doctor --tsv has no ok $what line: $out"
-  done
-  printf '%s\n' "$out" | grep -qF "$skill" || fail "$label: doctor --tsv does not name the skill $skill"
-  echo "smoke $label doctor --tsv --cwd (argv): OK"
+  # doctor --cwd DIR takes the path from argv. On Windows pass a path with characters outside
+  # the ANSI code page as the working directory (cd), not via --cwd; that form is checked
+  # above. So the non-ASCII --cwd case runs on other platforms only; an ASCII --cwd runs everywhere.
+  if [ "$label" = ascii ] || [ -z "$on_windows" ]; then
+    rc=0
+    out=$(cd "$dir" && bin doctor --tsv --cwd "$ndir" 2>"$work/err") || rc=$?
+    [ "$rc" -eq 0 ] || fail "$label: doctor --tsv --cwd (argv) exits $rc: $out $(head -c 400 "$work/err")"
+    for what in agent skill settings hook; do
+      printf '%s\n' "$out" | grep -q "^$what	ok	" || fail "$label: doctor --tsv has no ok $what line: $out"
+    done
+    printf '%s\n' "$out" | grep -qF "$skill" || fail "$label: doctor --tsv does not name the skill $skill"
+    echo "smoke $label doctor --tsv --cwd (argv): OK"
+  fi
 
   rc=0
-  (cd "$dir" && bin doctor --cwd "$ndir" --harness claude >"$work/out" 2>"$work/err") || rc=$?
+  if [ "$label" = ascii ] || [ -z "$on_windows" ]; then
+    (cd "$dir" && bin doctor --cwd "$ndir" --harness claude >"$work/out" 2>"$work/err") || rc=$?
+  else
+    (cd "$dir" && bin doctor --harness claude >"$work/out" 2>"$work/err") || rc=$?
+  fi
   [ "$rc" -eq 0 ] || fail "$label: doctor exits $rc: $(head -c 400 "$work/err")"
   echo "smoke $label doctor: OK"
 }
