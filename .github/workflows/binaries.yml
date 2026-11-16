@@ -2,10 +2,6 @@ name: binaries
 on:
   release:
     types: [published]
-  # TEMPORARY: probe run on the ack-paket branch, because workflow_dispatch only
-  # works for workflows on the default branch; remove before merging to main.
-  push:
-    branches: [ack-paket]
   workflow_dispatch:
     inputs:
       tag:
