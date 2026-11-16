@@ -21,6 +21,11 @@ Revision history for briefing
     main reaches marketplace users with auto-update.
   - An agent file saved with a UTF-8 byte order mark is read like one without:
     the mark no longer hides the opening `---`, so the spawn is briefed again.
+  - `briefing doctor --tsv` prints the findings as tab-separated lines (WHAT,
+    `ok`, `missing` or `warn`, NAME, TEXT) for tools, and `briefing hook EVENT`
+    names the hook event on the command line instead of reading it from the
+    payload.
+  - The `briefing` command now lives in `script/` instead of `bin/`.
 
 0.5.3     2026-10-06 05:22:17Z
   - Windows: briefing runs without Git Bash. Each hook script has a small

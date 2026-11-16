@@ -27,7 +27,7 @@ sub briefing_argv {
   return (
     $^X,
     '-I'.path(repo_root(), 'lib')->stringify,
-    path(repo_root(), 'bin', 'briefing')->stringify,
+    path(repo_root(), 'script', 'briefing')->stringify,
     @_,
   );
 }

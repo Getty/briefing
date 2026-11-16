@@ -96,6 +96,13 @@ sub is_dir {
   return path($file)->is_dir ? 1 : 0;
 }
 
+sub is_dangling_symlink {
+  my ( $self, $file ) = @_;
+  return 0 if $self->is_windows;
+  my $native = $self->_native_path($file);
+  return -l $native && !-e $native ? 1 : 0;
+}
+
 sub is_readable_file {
   my ( $self, $file ) = @_;
   return 0 unless $self->is_file($file);

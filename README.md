@@ -130,6 +130,7 @@ checkout with its Perl dependencies installed, the command provides:
 ```sh
 briefing hook                         # JSON hook payload on stdin
 briefing doctor --cwd . --harness both
+briefing doctor --tsv --cwd .         # tab-separated findings for tools (WHAT, ok|missing|warn, NAME, TEXT)
 briefing notice
 briefing --help
 briefing --version
@@ -303,10 +304,10 @@ prove -lr t
 
 For an explicit conformance run against the source command, set
 `BRIEFING_TEST_CLI` to a JSON argv array containing the absolute Perl path,
-`-I<checkout>/lib`, and `<checkout>/bin/briefing`, then run:
+`-I<checkout>/lib`, and `<checkout>/script/briefing`, then run:
 
 ```sh
-BRIEFING_TEST_CLI='["/usr/bin/perl","-I/absolute/checkout/lib","/absolute/checkout/bin/briefing"]' \
+BRIEFING_TEST_CLI='["/usr/bin/perl","-I/absolute/checkout/lib","/absolute/checkout/script/briefing"]' \
   python3 -m unittest discover tests -v
 ```
 

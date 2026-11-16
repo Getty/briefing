@@ -684,6 +684,73 @@ sub _resolve_skill_codex {
   return;
 }
 
+sub resolve_skill {
+  my ( $self, $name, %options ) = @_;
+  my $harness = defined $options{harness} ? $options{harness} : 'claude';
+  croak __PACKAGE__.'->resolve_skill requires harness claude or codex'
+    unless $harness eq 'claude' || $harness eq 'codex';
+  return unless $self->_nonempty_string($name);
+  return $harness eq 'claude'
+    ? $self->_resolve_skill_claude($name)
+    : $self->_resolve_skill_codex($name);
+}
+
+=method resolve_skill
+
+    my $file = $briefing->resolve_skill('plugin:skill', harness => 'claude');
+
+Returns the C<SKILL.md> path the spawn hook would read for one declared skill
+name, or nothing. Spawn, pre-flight and the team check share this resolution.
+
+=cut
+
+sub _usable_skill_name {
+  my ( $self, $name ) = @_;
+  return $name =~ m{\A[^*?\[\]/\\]+\z} ? 1 : 0;
+}
+
+sub skill_problem {
+  my ( $self, $name ) = @_;
+  return unless $self->_nonempty_string($name);
+  return if $self->resolve_skill( $name, harness => 'claude' );
+
+  if ($name =~ /:/) {
+    my ( $plugin, $skill ) = split /:/, $name, 2;
+    return 'not a usable skill name'
+      unless $self->_usable_skill_name($plugin)
+      && $self->_usable_skill_name($skill);
+    return "plugin '".$plugin."' has no skill '".$skill."'"
+      if grep { $_->[0] eq $plugin } @{ $self->_claude_plugins };
+    return "plugin '".$plugin."' is not installed and enabled";
+  }
+  return 'not a usable skill name' unless $self->_usable_skill_name($name);
+  return 'no such skill in .claude/skills, ~/.claude/skills or an installed and enabled plugin';
+}
+
+=method skill_problem
+
+    my $reason = $briefing->skill_problem('missing-skill');
+
+Returns a short reason when the Claude Code resolution cannot find the skill,
+nothing when it resolves.
+
+=cut
+
+sub claude_agent_skills {
+  my ( $self, $file ) = @_;
+  my ( $skills ) = $self->_claude_declaration($file);
+  return $skills;
+}
+
+=method claude_agent_skills
+
+    my $skills = $briefing->claude_agent_skills($agent_file);
+
+Returns the C<briefing.skills> names the spawn hook reads from one Claude Code
+agent file.
+
+=cut
+
 sub _claude_declaration {
   my ( $self, $file ) = @_;
   my ( $frontmatter ) = $self->_split_frontmatter(
@@ -1024,13 +1091,15 @@ sub _process_session_start {
 }
 
 sub process_hook {
-  my ( $self, $payload ) = @_;
+  my ( $self, $payload, %options ) = @_;
   my $empty = { output => undef, stderr => '', exit_code => 0 };
   return $empty unless ref $payload eq 'HASH';
 
   my $context = $self->_for_payload($payload);
   my ( $output, $stderr );
-  my $event = $payload->{hook_event_name};
+  my $event = defined $options{event}
+    ? $options{event}
+    : $payload->{hook_event_name};
   if ($context->_is_string($event) && $event eq 'SubagentStart') {
     ( $output, $stderr ) = $context->_process_subagent_start($payload);
   }
@@ -1060,6 +1129,8 @@ sub process_hook {
 
 Evaluates one hook payload and returns C<output>, C<stderr> and C<exit_code>
 without printing or changing files. A payload C<cwd> is used only for that call.
+The optional C<event> (C<SubagentStart>, C<PreToolUse> or C<SessionStart>)
+replaces the payload's C<hook_event_name> for routing.
 
 =cut
 

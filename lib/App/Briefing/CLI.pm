@@ -3,6 +3,7 @@ package App::Briefing::CLI;
 
 use Moo;
 use App::Briefing;
+use App::Briefing::Team;
 use Encode qw( encode_utf8 );
 use JSON::MaybeXS ();
 use namespace::clean;
@@ -27,8 +28,9 @@ sub _usage {
   my ( $self ) = @_;
   return <<'USAGE';
 Usage:
-  briefing hook
+  briefing hook [subagent-start|pre-tool-use|session-start]
   briefing doctor [--cwd DIR] [--harness claude|codex|both]
+  briefing doctor --tsv [--cwd DIR]
   briefing notice
   briefing --help
   briefing --version
@@ -60,15 +62,30 @@ sub _application {
   return $class->new(%attributes);
 }
 
+my %HOOK_EVENTS = (
+  subagentstart => 'SubagentStart',
+  pretooluse    => 'PreToolUse',
+  sessionstart  => 'SessionStart',
+);
+
+sub _hook_event {
+  my ( $self, $name ) = @_;
+  ( my $key = lc $name ) =~ s/[-_]//g;
+  return $HOOK_EVENTS{$key};
+}
+
 sub _run_hook {
-  my ( $self ) = @_;
+  my ( $self, $event ) = @_;
   local $/;
   my $raw = <STDIN>;
   return 0 unless defined $raw && length $raw;
   my $payload = eval { $self->_json->decode($raw) };
   return 0 unless ref $payload eq 'HASH';
 
-  my $result = $self->_application->process_hook($payload);
+  my $result = $self->_application->process_hook(
+    $payload,
+    defined $event ? ( event => $event ) : (),
+  );
   $self->_write_stderr( $result->{stderr} ) if length $result->{stderr};
   $self->_write_json( $result->{output}, 0 ) if defined $result->{output};
   return $result->{exit_code};
@@ -76,11 +93,15 @@ sub _run_hook {
 
 sub _doctor_options {
   my ( $self, $arguments ) = @_;
-  my %options = ( cwd => '.', harness => 'both' );
+  my %options = ( cwd => '.', harness => 'both', tsv => 0 );
   while (@{$arguments}) {
     my $argument = shift @{$arguments};
     if ($argument eq '--help') {
       return ( \%options, undef, 1 );
+    }
+    if ($argument eq '--tsv') {
+      $options{tsv} = 1;
+      next;
     }
     if ($argument eq '--cwd' || $argument eq '--harness') {
       return ( undef, $argument.' requires a value', 0 ) unless @{$arguments};
@@ -101,6 +122,8 @@ sub _doctor_options {
     unless $options{harness} eq 'claude'
       || $options{harness} eq 'codex'
       || $options{harness} eq 'both';
+  return ( undef, '--tsv checks the Claude Code team only; use --harness claude or both', 0 )
+    if $options{tsv} && $options{harness} eq 'codex';
   return ( \%options, undef, 0 );
 }
 
@@ -123,6 +146,32 @@ sub _harness_label {
   return $harness eq 'claude' ? 'Claude Code' : 'Codex';
 }
 
+sub _run_doctor_tsv {
+  my ( $self, $base, $cwd ) = @_;
+  if (!$base->filesystem->is_dir($cwd)) {
+    $self->_write_stderr(
+      "briefing doctor: '".$cwd."' is not a directory.\n"
+      ."briefing doctor: pass the repository that holds the team.\n"
+    );
+    return 2;
+  }
+  my $app = $self->_application(
+    cwd        => $cwd,
+    home       => $base->home,
+    codex_home => $base->codex_home,
+    filesystem => $base->filesystem,
+  );
+  my $findings = App::Briefing::Team->new( briefing => $app )->findings;
+  my $failed = 0;
+  my $text = '';
+  for my $finding (@{$findings}) {
+    $failed = 1 if $finding->{status} eq 'missing';
+    $text .= join( "\t", @{$finding}{qw( what status name text )} )."\n";
+  }
+  $self->_write_stdout($text);
+  return $failed ? 1 : 0;
+}
+
 sub _run_doctor {
   my ( $self, $arguments ) = @_;
   my ( $options, $error, $help ) = $self->_doctor_options($arguments);
@@ -137,6 +186,7 @@ sub _run_doctor {
 
   my $base = $self->_application;
   my $cwd = $base->filesystem->absolute( $options->{cwd} );
+  return $self->_run_doctor_tsv( $base, $cwd ) if $options->{tsv};
   my $app = $self->_application(
     cwd        => $cwd,
     home       => $base->home,
@@ -208,6 +258,14 @@ sub run {
   }
   if ($command eq 'hook') {
     return $self->_run_hook if !@arguments;
+    if (@arguments == 1) {
+      my $event = $self->_hook_event( $arguments[0] );
+      return $self->_run_hook($event) if defined $event;
+      # An unknown EVENT word is hook input, not a usage error: a hook never blocks (exit 0).
+      # Every other malformed command line below stays a usage error (exit 2).
+      $self->_write_stderr('briefing: unknown hook event: '.$arguments[0]."\n");
+      return 0;
+    }
   }
   elsif ($command eq 'doctor') {
     return $self->_run_doctor(\@arguments);
@@ -224,7 +282,8 @@ sub run {
 
     exit App::Briefing::CLI->run(\@ARGV);
 
-Runs one C<hook>, C<doctor> or C<notice> command and returns its process exit
+Runs one C<hook> (optionally naming its event), C<doctor> (optionally C<--tsv>)
+or C<notice> command and returns its process exit
 code. C<--help> and C<--version> are handled without constructing a briefing
 context.
 

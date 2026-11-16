@@ -1,7 +1,7 @@
 """Select the reference Python entrypoint or an external briefing CLI.
 
 BRIEFING_TEST_CLI is a JSON array, for example
-["/usr/bin/perl", "-I/absolute/path/to/lib", "/absolute/path/to/bin/briefing"].
+["/usr/bin/perl", "-I/absolute/path/to/lib", "/absolute/path/to/script/briefing"].
 The configured command is executed as an argv list and receives one of the
 public subcommands (hook, doctor, or notice) plus the caller's arguments; it
 is never passed to a shell.
