@@ -17,9 +17,10 @@ my $cwd  = File::Spec->catdir( $root, 'project' );
 
 sub spew {
   my ( $path, $text ) = @_;
-  my ( undef, $dir ) = File::Spec->splitpath($path);
+  # Keep the volume: without it make_path creates the directory on the current drive (Windows).
+  my ( $vol, $dir ) = File::Spec->splitpath($path);
   require File::Path;
-  File::Path::make_path($dir);
+  File::Path::make_path( File::Spec->catpath( $vol, $dir, '' ) );
   open my $fh, '>', $path or die "cannot write $path: $!\n";
   binmode $fh;
   print {$fh} $text;
