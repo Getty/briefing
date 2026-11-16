@@ -7,9 +7,9 @@ __pycache__/
 .coverage
 htmlcov/
 
-# karr materialized task view -- never commit
-tasks/
-config.yml
+# Materialisierte Karr-Ansicht, nicht die versionierten refs/karr/*
+/tasks/
+/config.yml
 
 # Claude Code worktrees (claude --worktree / isolated agents) -- never commit
 /.claude/worktrees/
