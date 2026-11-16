@@ -99,5 +99,12 @@ for my $file ( sort keys %INC ) {
   next unless $file =~ /\.pm\z/ && !ref $INC{$file};
   ( my $module = $file ) =~ s{/}{::}g;
   $module =~ s/\.pm\z//;
+  # Strawberry Perl's portable launcher (Portable, Portable::CPAN, Portable::HomeDir, ...) is
+  # already in %INC when this script starts, because the perl.exe startup loads it. The CLI
+  # never uses it; packing it would drag in CPAN-client modules such as IO::Socket::SSL and
+  # Net::SSLeay, which briefing (no network access) must not ship. The filter is deliberately
+  # narrow: subtracting a pre-run %INC snapshot would also drop pragmas and core modules
+  # (strict, warnings, Carp, ...) that the CLI needs and that must stay in the list.
+  next if $module =~ /\APortable(?:::|\z)/;
   print "$module\n" unless $seen{$module}++;
 }
