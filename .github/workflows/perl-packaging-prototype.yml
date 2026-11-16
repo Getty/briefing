@@ -1,0 +1,66 @@
+name: Perl-Packaging-Prototyp
+
+# Freigegebener Wegwerf-Testbranch; main und Releases bleiben unberührt.
+on:
+  workflow_dispatch:
+  push:
+    branches: [spike/perl-packaging]
+
+permissions:
+  contents: read
+
+jobs:
+  native-probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            architecture: x86_64
+            runner_arch: X64
+            perl_distribution: default
+            binary: probe
+          - os: macos-15-intel
+            architecture: x86_64
+            runner_arch: X64
+            perl_distribution: default
+            binary: probe
+          - os: windows-2022
+            architecture: x86_64
+            runner_arch: X64
+            perl_distribution: strawberry
+            binary: probe.exe
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }} / ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.40'
+          distribution: ${{ matrix.perl_distribution }}
+      - name: Tatsächliche Runner-Architektur prüfen
+        env:
+          EXPECTED_RUNNER_ARCH: ${{ matrix.runner_arch }}
+        run: python -c "import os,platform; print(platform.platform(), platform.machine(), os.environ['RUNNER_ARCH']); assert os.environ['RUNNER_ARCH'] == os.environ['EXPECTED_RUNNER_ARCH']"
+      - name: Build-Abhängigkeiten nur in der Job-Umgebung installieren
+        shell: bash
+        run: cpanm --notest --local-lib-contained "$GITHUB_WORKSPACE/prototypes/perl-packaging/.deps" PAR::Packer@1.064 Path::Tiny@0.150
+      - name: Natives Binary ohne Cross-Compilation bauen
+        env:
+          PERL5LIB: ${{ github.workspace }}/prototypes/perl-packaging/.deps/lib/perl5
+        run: python prototypes/perl-packaging/build.py
+      - name: Smoke-Test und Messung mit leerem PATH
+        run: python prototypes/perl-packaging/smoke.py prototypes/perl-packaging/build/${{ matrix.binary }} --expect-arch ${{ matrix.architecture }} --report prototypes/perl-packaging/build/smoke.json
+      - name: Prüfberichte sichern, keine Binaries veröffentlichen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perl-probe-${{ matrix.os }}-${{ matrix.architecture }}
+          path: prototypes/perl-packaging/build/*.json
+          if-no-files-found: warn
+          retention-days: 7
+      # Die Buildhosts enthalten Perl. Fehlende externe Runtime bleibt hier NOT_PROVEN.
