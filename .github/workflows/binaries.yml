@@ -15,7 +15,6 @@ jobs:
   binaries:
     permissions:
       contents: write
-    uses: Getty/p5-dist-zilla-pluginbundle-author-getty/.github/workflows/dzil-binary.yml@main  # TEMPORARY probe ref; release uses @binary-v1
+    uses: Getty/p5-dist-zilla-pluginbundle-author-getty/.github/workflows/dzil-binary.yml@binary-v1
     with:
       tag: ${{ github.event.release.tag_name || inputs.tag }}
-      bundle_ref: main  # TEMPORARY; remove with the @main ref above
