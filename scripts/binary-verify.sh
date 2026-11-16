@@ -18,7 +18,6 @@ set -euo pipefail
 [ -f script/briefing ] && [ -f lib/App/Briefing.pm ] || { echo "FAIL: run from the dist root of briefing" >&2; exit 1; }
 BIN=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 [ -f "$BIN" ] || { echo "FAIL: no such binary: $BIN" >&2; exit 1; }
-chmod +x "$BIN"
 root=$(pwd)
 
 mkd=$(mktemp -d) || exit 1
@@ -26,6 +25,11 @@ work=$(cd "$mkd" && pwd -P) || exit 1
 trap 'rm -rf "${work:?}"' EXIT
 mkdir -p "$work/empty"
 runtime_path=$work/empty
+# The binary may sit on a read-only mount with its mode set: never chmod in place.
+if [ ! -x "$BIN" ]; then
+  cp "$BIN" "$work/briefing-bin" && chmod +x "$work/briefing-bin" || { echo "FAIL: cannot make a runnable copy of $BIN" >&2; exit 1; }
+  BIN=$work/briefing-bin
+fi
 . "$(dirname "${BASH_SOURCE[0]}")/binary-lib.sh"
 
 # same_as_perl CASE STDIN ARGS...: STDOUT and exit code of the binary match the reference's.

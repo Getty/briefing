@@ -11,7 +11,7 @@
 #   exits 2; then, in an ASCII project and again in one whose directory and skill have
 #   non-ASCII names (Windows: the umlaut and CJK paths the packaging probe failed on, see
 #   docs/perl-direction.md point 1):
-#     doctor --tsv     exits 0 and reports agent, skill, settings and hook as ok;
+#     doctor --tsv     (from the directory, then with --cwd DIR) exits 0 and reports agent, skill, settings and hook as ok;
 #     doctor           exits 0;
 #     hook subagent-start   writes the briefing with the skill's marker text (a spawn is
 #                      briefed), exit 0;
@@ -29,7 +29,6 @@ set -euo pipefail
 [ -f lib/App/Briefing.pm ] || { echo "FAIL: run from the dist root of briefing" >&2; exit 1; }
 [ -f "$1" ] || { echo "FAIL: no such binary: $1" >&2; exit 1; }
 BIN=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
-chmod +x "$BIN" # an Actions artifact or an HTTP download carries no mode
 
 want=${BRIEFING_EXPECT_VERSION:-$(sed -n "s/^our \$VERSION = '\([^']*\)';.*/\1/p" lib/App/Briefing.pm | head -n 1)}
 [ -n "$want" ] || { echo "FAIL: cannot work out the expected version" >&2; exit 1; }
@@ -39,6 +38,13 @@ work=$(cd "$mkd" && pwd -P) || exit 1
 trap 'rm -rf "${work:?}"' EXIT
 mkdir -p "$work/empty"
 runtime_path=${BRIEFING_SMOKE_PATH:-$work/empty}
+# The bundle mounts the binary read-only with its mode already set; an Actions artifact or an
+# HTTP download carries none. Never chmod in place: copy to the work dir and run that.
+if [ ! -x "$BIN" ]; then
+  cp "$BIN" "$work/briefing-bin" && chmod +x "$work/briefing-bin" || fail_early=1
+  [ -z "${fail_early:-}" ] || { echo "FAIL: cannot make a runnable copy of $BIN" >&2; exit 1; }
+  BIN=$work/briefing-bin
+fi
 . "$(dirname "${BASH_SOURCE[0]}")/binary-lib.sh"
 
 out=$(bin --version) || fail "--version failed"
@@ -63,20 +69,6 @@ run_case() {
   fixture "$name" "$skill"
   ndir=$(native "$dir")
   transcript=$(native "$home")/.claude/projects/p/s.jsonl
-
-  rc=0
-  out=$(cd "$dir" && bin doctor --tsv --cwd "$ndir" 2>"$work/err") || rc=$?
-  [ "$rc" -eq 0 ] || fail "$label: doctor --tsv exits $rc: $out $(head -c 400 "$work/err")"
-  for what in agent skill settings hook; do
-    printf '%s\n' "$out" | grep -q "^$what	ok	" || fail "$label: doctor --tsv has no ok $what line: $out"
-  done
-  printf '%s\n' "$out" | grep -qF "$skill" || fail "$label: doctor --tsv does not name the skill $skill"
-  echo "smoke $label doctor --tsv: OK"
-
-  rc=0
-  (cd "$dir" && bin doctor --cwd "$ndir" --harness claude >"$work/out" 2>"$work/err") || rc=$?
-  [ "$rc" -eq 0 ] || fail "$label: doctor exits $rc: $(head -c 400 "$work/err")"
-  echo "smoke $label doctor: OK"
 
   rc=0
   printf '{"hook_event_name":"SubagentStart","agent_type":"demo","agent_id":"a","cwd":"%s","transcript_path":"%s"}' \
@@ -104,6 +96,33 @@ run_case() {
   grep -qF '"systemMessage"' "$work/out" || fail "$label: session-start does not warn: $(head -c 400 "$work/out")"
   echo "smoke $label hook session-start: OK"
   rm -f "$dir/.claude/agents/broken.md"
+
+  # doctor without --cwd reads the directory from the process (a wide API on Windows).
+  rc=0
+  out=$(cd "$dir" && bin doctor --tsv 2>"$work/err") || rc=$?
+  [ "$rc" -eq 0 ] || fail "$label: doctor --tsv (cwd) exits $rc: $out $(head -c 400 "$work/err")"
+  for what in agent skill settings hook; do
+    printf '%s\n' "$out" | grep -q "^$what	ok	" || fail "$label: doctor --tsv (cwd) has no ok $what line: $out"
+  done
+  printf '%s\n' "$out" | grep -qF "$skill" || fail "$label: doctor --tsv (cwd) does not name the skill $skill"
+  echo "smoke $label doctor --tsv (cwd): OK"
+
+  # doctor --cwd DIR takes the path from argv. Windows hands Perl an ANSI command line, so
+  # characters outside the code page arrive as '?': a known limit of argv, not of the hooks
+  # (their paths come as UTF-8 JSON on stdin, checked above).
+  rc=0
+  out=$(cd "$dir" && bin doctor --tsv --cwd "$ndir" 2>"$work/err") || rc=$?
+  [ "$rc" -eq 0 ] || fail "$label: doctor --tsv --cwd (argv) exits $rc: $out $(head -c 400 "$work/err")"
+  for what in agent skill settings hook; do
+    printf '%s\n' "$out" | grep -q "^$what	ok	" || fail "$label: doctor --tsv has no ok $what line: $out"
+  done
+  printf '%s\n' "$out" | grep -qF "$skill" || fail "$label: doctor --tsv does not name the skill $skill"
+  echo "smoke $label doctor --tsv --cwd (argv): OK"
+
+  rc=0
+  (cd "$dir" && bin doctor --cwd "$ndir" --harness claude >"$work/out" 2>"$work/err") || rc=$?
+  [ "$rc" -eq 0 ] || fail "$label: doctor exits $rc: $(head -c 400 "$work/err")"
+  echo "smoke $label doctor: OK"
 }
 
 run_case ascii project demo-skill
