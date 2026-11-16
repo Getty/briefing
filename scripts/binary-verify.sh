@@ -67,6 +67,9 @@ same_as_perl session-start "$work/in-session" hook session-start
 
 # The zip central directory of a PAR executable names every packed file in clear.
 if grep -aq -e 'Net/SSLeay' -e 'IO/Socket/SSL' "$BIN"; then
+  # Name what matched (byte offset: matched text), so the log shows the cause. Diagnostic only.
+  echo "TLS gate: first matches (offset:text, 20 of $(grep -a -o -e 'Net/SSLeay' -e 'IO/Socket/SSL' "$BIN" | wc -l | tr -d ' ')):" >&2
+  { grep -a -o -b -e '[A-Za-z0-9_./-]*Net/SSLeay[A-Za-z0-9_./-]*' -e '[A-Za-z0-9_./-]*IO/Socket/SSL[A-Za-z0-9_./-]*' "$BIN" | head -n 20 >&2; } || true
   fail "the archive holds a TLS module; briefing has no network access and must not pack one"
 fi
 echo "verify: OK"
