@@ -1,0 +1,398 @@
+#!/bin/sh
+# briefing starter: the plugin's `briefing` on PATH and the command its hooks run
+# (`briefing hook EVENT`, plugin hooks/hooks.json and hooks/codex-hooks.json). First match wins:
+#   1. the release binary of the plugin's version for this platform, cached under
+#      <claudeConfigDir>/briefing/bin/<version>/ and rechecked against its pinned checksum;
+#   2. else that binary, downloaded only by the SessionStart hook (`hook session-start`; curl,
+#      else wget) - never by --version, --help, doctor or any other command, checked against the checksum pinned in the plugin (sha256sum, else
+#      `shasum -a 256`), then cached;
+#   3. else the plugin's own fallback, which is the previous behaviour, never unbriefed:
+#        hook EVENT     the Python hook, hooks/briefing-preload, with this process's stdin;
+#        doctor [...]   the Python doctor, hooks/briefing-preload doctor ...;
+#        anything else (--version, --help, notice, doctor --tsv, ...): the plugin's Perl
+#        (lib/ + script/briefing), but only when this machine's perl already loads
+#        App::Briefing - a system perl normally lacks Moo, Path::Tiny, JSON::MaybeXS and
+#        TOML::Tiny, so Perl is no fallback for hooks: a hook must never pay for probing
+#        it, and an unloadable Perl would leave the spawn unbriefed;
+#   4. else one line saying why: on stderr with exit 1; for `hook ...` the hook's one
+#      warning line on stdout instead, with exit 0 (a hook never fails).
+# An engine it starts is exec'd with this process's arguments, stdin and stdout untouched.
+# The Python hook decides from the payload's hook_event_name, so the EVENT word is not
+# passed on; the binary takes it.
+# A failed SessionStart provision backs off for 15 minutes per version/platform. Nothing but
+# `hook session-start` provisions, so neither an agent spawn nor `briefing --version` or
+# `briefing doctor` ever waits for (or triggers) a download. Not covered here:
+#   - Windows: Claude Code starts bin/briefing.exe (winlaunch), which runs the Python hook;
+#     the Windows binary is built and smoke-tested but not yet started (winlaunch would have to
+#     try several run lines, windows-developer #21);
+#   - a platform with no pinned binary (anything outside dist.ini's binary_platforms, e.g. FreeBSD or
+#     Linux on another architecture): straight to the fallback;
+#   - sweeping old versions out of the binary cache.
+# Without the pinned checksum file, or while it has no line for this platform - the state of the
+# repository until a release writes it - there is no version to look for, so neither step 1
+# nor 2 runs: nothing is downloaded before activation.
+#
+# No `set -e`/`set -u`: each step falls through to the next, and a hook must exit 0 on every
+# path - an unset variable under -u exits 2, which a hook may read as "block".
+#
+# winlaunch: run python {root}/hooks/briefing-preload
+
+# --- Settings. Lower case, so none of them reaches a child's environment.
+
+# Trust anchor: the checksums pinned in the plugin, a file next to this starter that the
+# release writes - the release's SHA256SUMS as is (the [@Author::GETTY] binary workflow
+# attaches it next to the assets): sha256sum lines "<sha256>  briefing-<version>-<os>-<arch>",
+# plus ".exe" on Windows, one per platform asset (other names are ignored). The version comes
+# from the asset names, so this file is the one place a release names what the plugin runs.
+# The release's own SHA256SUMS is deliberately not downloaded: it travels with the assets it
+# vouches for, so it would prove nothing the pinned file does not.
+pinned_sums=briefing-binaries.sha256
+# Where the assets are: this prefix, the release tag, then /<asset>. The tag is the bundle's
+# tag_format (default %v: the bare dist version), so release_tag_prefix is empty; the assets are
+# briefing-<version>-<platform> (.exe on Windows). BRIEFING_BINARY_BASE_URL replaces
+# "<prefix><tag>" (tests serve a binary locally). That is safe from any source: nothing is kept
+# or run unless its checksum is the pinned one.
+release_url_prefix=https://github.com/Getty/briefing/releases/download/
+release_tag_prefix=
+# The binary cache: <claudeConfigDir>/briefing/bin/<version>/ - shared by every harness that
+# starts this file.
+cache_subdir=briefing/bin
+# A PAR binary unpacks its archive into $PAR_GLOBAL_TEMP on its first start (seconds, under /tmp
+# by default, which a reboot empties). Point it at a directory beside the binary and warm that
+# once, right after the download, so no hook pays for the unpacking.
+par_temp_var=PAR_GLOBAL_TEMP
+warm_args=--version
+download_connect_timeout=10
+download_max_time=60
+# A failed SessionStart provision is retried after this modest fixed backoff. Tests inject
+# BRIEFING_STARTER_NOW rather than sleeping; normal starts use `date +%s`.
+retry_backoff_seconds=900
+# --- end of the settings.
+
+fail_status=1
+[ "${1-}" = hook ] && fail_status=0 # a hook never fails
+# Only `hook session-start` may provision. Prompt, background and move/tool hooks must not spend
+# their hook budget on it, and CLI commands (--version, doctor, ...) are diagnostics that must not
+# touch the network; they use a cached binary or the fallback.
+can_provision=
+session_start=
+if [ "${1-}" = hook ] && [ "${2-}" = session-start ]; then
+  can_provision=yes
+  session_start=yes
+fi
+
+# Follow our own symlink chain to the real file: lib/, hooks/ and the pinned checksums sit
+# next to the plugin's bin/, not the link's.
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink -- "$self")
+  case "$target" in
+    /*) self=$target ;;
+    *) self=$(dirname -- "$self")/$target ;;
+  esac
+done
+root=$(CDPATH='' cd -P -- "$(dirname -- "$self")/.." && pwd)
+
+why_binary=
+tmp=
+
+# The SHA-256 of file $1, lower-case hex, with whichever tool is there.
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    set -- "$(sha256sum <"$1" 2>/dev/null)"
+  else
+    set -- "$(shasum -a 256 <"$1" 2>/dev/null)"
+  fi
+  printf '%s' "${1%% *}"
+}
+
+# Shell arithmetic accepts a leading zero as octal on some platforms. Keep timestamps canonical
+# decimal before arithmetic so corrupt local state cannot end a hook with "Illegal number".
+is_canonical_epoch() {
+  case $1 in
+    0) return 0 ;;
+    [1-9]*)
+      case $1 in *[!0-9]*) return 1 ;; esac
+      if [ "${#1}" -le 10 ]; then return 0; fi
+      return 1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# The test-only clock fixture avoids sleeping through the retry interval. When set, it must be a
+# canonical decimal epoch; an unavailable date or bad clock disables backoff rather than blocking.
+now_epoch() {
+  if [ "${BRIEFING_STARTER_NOW+x}" = x ]; then
+    now=$BRIEFING_STARTER_NOW
+  else
+    now=$(date +%s 2>/dev/null)
+  fi
+  is_canonical_epoch "$now" || return 1
+  printf '%s' "$now"
+}
+
+# A failed timestamp is deliberately only a best-effort throttle: it is untrusted local state,
+# so malformed or unreadable contents never make the starter fail.
+retry_backoff_active() {
+  [ "$session_start" = yes ] && [ -f "$retry_file" ] || return 1
+  failed_at=$(cat "$retry_file" 2>/dev/null)
+  is_canonical_epoch "$failed_at" || return 1
+  now=$(now_epoch) || return 1
+  if [ "$now" -lt "$failed_at" ] 2>/dev/null; then return 0; fi
+  elapsed=$((now - failed_at))
+  [ "$elapsed" -lt "$retry_backoff_seconds" ]
+}
+
+record_failed_session_start() {
+  [ "$session_start" = yes ] || return 0
+  now=$(now_epoch) || return 0
+  if mkdir -p -- "$cache_dir" 2>/dev/null; then
+    retry_tmp=$cache_dir/.$asset.failed-at.$$.tmp
+    if (umask 077 && printf '%s\n' "$now" >"$retry_tmp") && mv -f -- "$retry_tmp" "$retry_file" 2>/dev/null; then
+      :
+    else
+      rm -f -- "$retry_tmp" 2>/dev/null
+    fi
+  fi
+}
+
+clear_failed_session_start() {
+  rm -f -- "$retry_file" 2>/dev/null || :
+}
+
+# Trust boundary, stated honestly: the cache directory belongs to the user, and anyone who can
+# write there can already run code as that user. What is verified is the binary file - its pinned
+# hash is recomputed before every exec, and a download is checked before it is cached. The tree
+# the binary unpacks beside itself (<binary>.par/) is NOT re-verified: it is derived state that
+# the binary itself extracted, and checking it would defend nothing the user's own permissions
+# do not already decide. A bad binary falls through to provision or the local engines.
+verify_cached_binary() {
+  if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    why_binary="neither sha256sum nor shasum is there to verify the cached $asset"
+    return 1
+  fi
+  if [ "$(sha256_of "$bin_file")" != "$sum" ]; then
+    why_binary="the cached $asset does not match its pinned checksum and was refused"
+    return 1
+  fi
+  return 0
+}
+
+# Steps 1 and 2. Sets bin_file and par_dir and returns 0 when the binary is there to run;
+# else sets why_binary.
+find_binary() {
+  if [ ! -f "$root/bin/$pinned_sums" ]; then
+    why_binary="no binary checksums are pinned in the plugin"
+    return 1
+  fi
+  case $(uname -s 2>/dev/null) in
+    Linux) os=linux ;;
+    Darwin) os=macos ;;
+    *) os= ;;
+  esac
+  case $(uname -m 2>/dev/null) in
+    x86_64 | amd64) arch=x86_64 ;;
+    aarch64 | arm64) arch=arm64 ;;
+    *) arch= ;;
+  esac
+  if [ -z "$os" ] || [ -z "$arch" ]; then
+    why_binary="no binary is built for this platform"
+    return 1
+  fi
+  sum=
+  version=
+  while read -r line_sum line_name || [ -n "$line_sum" ]; do
+    line_name=${line_name#\*} # sha256sum's binary-mode marker
+    case $line_name in
+      briefing-*-"$os-$arch") ;;
+      *) continue ;;
+    esac
+    version=${line_name#briefing-}
+    version=${version%-"$os-$arch"}
+    sum=$line_sum
+    break
+  done <"$root/bin/$pinned_sums"
+  if [ -z "$sum" ]; then
+    why_binary="no binary checksum is pinned for $os-$arch"
+    return 1
+  fi
+  # 64 lower-case hex digits, as sha256sum writes them; a version that starts with a digit
+  # and names one path segment.
+  case $sum in *[!0-9a-f]*) sum= ;; esac
+  case $version in [0-9]*) ;; *) version= ;; esac
+  case $version in *[!0-9A-Za-z.+-]*) version= ;; esac
+  if [ "${#sum}" -ne 64 ] || [ -z "$version" ]; then
+    why_binary="the pinned binary checksum line for $os-$arch is malformed"
+    return 1
+  fi
+
+  config_dir=${CLAUDE_CONFIG_DIR:-}
+  if [ -z "$config_dir" ] && [ -n "${HOME:-}" ]; then config_dir=$HOME/.claude; fi
+  case $config_dir in
+    /*) ;;
+    *)
+      why_binary="no absolute CLAUDE_CONFIG_DIR or HOME to keep the binary in"
+      return 1
+      ;;
+  esac
+  asset=briefing-$version-$os-$arch
+  cache_dir=$config_dir/$cache_subdir/$version
+  # The checksum is part of the name: a cached binary is always the one this plugin pins,
+  # even if a release were rebuilt under the same version.
+  bin_file=$cache_dir/$asset-$sum
+  par_dir=$bin_file.par
+  retry_file=$cache_dir/.$asset.failed-at
+  if [ -f "$bin_file" ] && [ -x "$bin_file" ] && verify_cached_binary; then
+    clear_failed_session_start
+    return 0
+  fi
+  if [ "$can_provision" != yes ]; then
+    why_binary="the pinned binary is not cached; it is only downloaded by the SessionStart hook"
+    return 1
+  fi
+  if retry_backoff_active; then
+    why_binary="the last SessionStart binary provision failed; retrying after $retry_backoff_seconds seconds"
+    return 1
+  fi
+  if fetch_binary; then
+    clear_failed_session_start
+    return 0
+  fi
+  record_failed_session_start
+  return 1
+}
+
+# Step 2: download, check, warm, then rename into place - two starts at once each use a temp
+# file of their own and rename the same bytes over each other. Every failure leaves nothing
+# of the download behind.
+fetch_binary() {
+  # Look for the checksum tool first: what cannot be checked is not fetched.
+  if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    why_binary="neither sha256sum nor shasum is there to check a binary download"
+    return 1
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    fetcher=curl
+  elif command -v wget >/dev/null 2>&1; then
+    fetcher=wget
+  else
+    why_binary="neither curl nor wget is there to download $asset"
+    return 1
+  fi
+  if ! mkdir -p -- "$cache_dir" 2>/dev/null; then
+    why_binary="cannot create the binary cache"
+    return 1
+  fi
+  tmp=$cache_dir/.$asset.$$.tmp
+  trap 'rm -f -- "$tmp"' EXIT
+  trap 'rm -f -- "$tmp"; record_failed_session_start; exit $fail_status' HUP INT TERM
+  if ! download "${BRIEFING_BINARY_BASE_URL:-$release_url_prefix$release_tag_prefix$version}/$asset" "$tmp" ||
+    [ ! -f "$tmp" ]; then
+    drop_download "the download of $asset failed"
+    return 1
+  fi
+  if [ "$(sha256_of "$tmp")" != "$sum" ]; then
+    drop_download "the downloaded $asset does not match its pinned checksum and was refused"
+    return 1
+  fi
+  # Warmed under its temp name, before the rename: only a binary that ran here is ever cached.
+  # PAR (pp 1.064, tried by hand) unpacks straight into $par_dir, whose parent must exist, and
+  # a later run under the final name adds only a copy of its small loader. The unpacked files
+  # stay even if this fails - a concurrent start may be running from them already, and they
+  # are of the pinned bytes. $warm_args is split into words on purpose.
+  if ! chmod 755 "$tmp" 2>/dev/null ||
+    ! env "$par_temp_var=$par_dir" "$tmp" $warm_args </dev/null >/dev/null 2>&1; then
+    drop_download "the downloaded $asset does not run here"
+    return 1
+  fi
+  if ! mv -f -- "$tmp" "$bin_file" 2>/dev/null; then
+    drop_download "cannot move $asset into the binary cache"
+    return 1
+  fi
+  tmp=
+  trap - EXIT HUP INT TERM
+  return 0
+}
+
+# Fetch URL $1 into file $2: quiet, bounded in time, never reading the hook's stdin.
+download() {
+  if [ "$fetcher" = curl ]; then
+    curl -fsSL --connect-timeout "$download_connect_timeout" --max-time "$download_max_time" \
+      -o "$2" "$1" </dev/null >/dev/null 2>&1
+  else
+    wget -q -T "$download_connect_timeout" -O "$2" "$1" </dev/null >/dev/null 2>&1
+  fi
+}
+
+drop_download() {
+  rm -f -- "$tmp"
+  tmp=
+  trap - EXIT HUP INT TERM
+  rmdir -- "$cache_dir" 2>/dev/null # only if this start left it empty
+  why_binary=$1
+}
+
+# Step 3, hooks and the doctor: the Python reference, which needs nothing but python3.
+find_python() {
+  if command -v python3 >/dev/null 2>&1; then python=python3
+  elif command -v python >/dev/null 2>&1; then python=python
+  else
+    why_python="python3 was not found on PATH"
+    return 1
+  fi
+  if [ ! -f "$root/hooks/briefing-preload" ]; then
+    why_python="hooks/briefing-preload is missing"
+    return 1
+  fi
+  return 0
+}
+
+# Step 3, everything else: the plugin's Perl, once its modules load.
+find_perl() {
+  if ! command -v perl >/dev/null 2>&1; then
+    why_perl="perl was not found on PATH"
+    return 1
+  fi
+  if [ ! -f "$root/script/briefing" ]; then
+    why_perl="script/briefing is missing"
+    return 1
+  fi
+  if ! perl -I"$root/lib" -e 'require App::Briefing::CLI' </dev/null >/dev/null 2>&1; then
+    why_perl="this perl does not load App::Briefing (Moo, Path::Tiny, JSON::MaybeXS, TOML::Tiny are needed)"
+    return 1
+  fi
+  return 0
+}
+
+if find_binary; then exec env "$par_temp_var=$par_dir" "$bin_file" "$@"; fi
+
+why_python=
+why_perl=
+case ${1-} in
+  hook)
+    if find_python; then exec "$python" "$root/hooks/briefing-preload"; fi
+    why_other=$why_python
+    ;;
+  doctor)
+    use_perl=
+    for argument in "$@"; do [ "$argument" = --tsv ] && use_perl=yes; done
+    if [ -z "$use_perl" ] && find_python; then exec "$python" "$root/hooks/briefing-preload" "$@"; fi
+    if find_perl; then exec perl -I"$root/lib" "$root/script/briefing" "$@"; fi
+    why_other="$why_python; $why_perl"
+    ;;
+  *)
+    if find_perl; then exec perl -I"$root/lib" "$root/script/briefing" "$@"; fi
+    why_other=$why_perl
+    ;;
+esac
+
+# Step 4. Every part of the line is fixed text or a checked $why_binary - nothing in it needs
+# JSON escaping.
+message="briefing: no binary ($why_binary) and no fallback ($why_other)."
+if [ "$fail_status" -eq 0 ]; then
+  printf '{"systemMessage":"%s"}\n' "$message"
+else
+  printf '%s\n' "$message" >&2
+fi
+exit "$fail_status"

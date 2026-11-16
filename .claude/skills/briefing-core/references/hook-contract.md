@@ -62,7 +62,7 @@ also applies if, under Claude Code, a skill disappears between the guard and
 
 Neither harness can stop the spawn at `SubagentStart`. Codex ignores
 `continue: false` despite its compatibility parser; a partial briefing is not a
-substitute. `additionalContextLimit: 0` in `hooks/hooks.json` prevents Codex
+substitute. `additionalContextLimit: 0` in `hooks/hooks.json` and `hooks/codex-hooks.json` prevents Codex
 from writing long output to disk and providing only a preview to the model
 context (the default is about 2500 tokens).
 
@@ -105,12 +105,19 @@ without an unambiguous signal, both are checked.
 compaction remain silent. Overlong but working briefings are not reported again
 here. Doctor, by contrast, shows errors and budget warnings.
 
-## Shared hook file
+## Hook files
 
-`hooks/hooks.json` remains shared: `SubagentStart` serves both harnesses,
-`PreToolUse` only the Claude Code guard. Codex also resolves `${CLAUDE_PLUGIN_ROOT}`.
-Windows invocation is exec form (`command` with `args: []`); the `.exe` launcher
-runs there instead of the extensionless script. Background and native tests:
+Both files run the starter `bin/briefing hook EVENT`
+(`pre-tool-use`, `subagent-start`, `session-start`); `additionalContextLimit: 0` on
+`SubagentStart` stays in both. `hooks/hooks.json` serves Claude Code: exec form
+(`command` plus `args`), `PreToolUse` guard included. Codex ignores `args` and runs the
+command text through its shell, so `hooks/codex-hooks.json` (named by
+`.codex-plugin/plugin.json`) carries the arguments inside the command and has no
+`PreToolUse` entry (the guard is Claude Code only). Codex also resolves
+`${CLAUDE_PLUGIN_ROOT}`. On Windows the exec-form entry starts `bin/briefing.exe`
+(winlaunch), which runs the Python hook. Without a verified cached binary the starter runs
+`hooks/briefing-preload`, so the contract above holds either way; `session-start` is the
+only event that may download the binary. The marketplace notice hook is unchanged. Background and native tests:
 `winlaunch/README.md`.
 
 `hooks/briefing-marketplace-notice` is a separate SessionStart notice with its

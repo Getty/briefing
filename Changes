@@ -26,6 +26,10 @@ Revision history for briefing
     names the hook event on the command line instead of reading it from the
     payload.
   - The `briefing` command now lives in `script/` instead of `bin/`.
+  - The plugin ships a starter `bin/briefing` (and `bin/briefing.exe` on
+    Windows) that runs a prebuilt `briefing` binary when one is present and the
+    Python hook otherwise. Binaries are built by a workflow in CI; the CPAN
+    distribution installs only `script/briefing`.
 
 0.5.3     2026-10-06 05:22:17Z
   - Windows: briefing runs without Git Bash. Each hook script has a small
