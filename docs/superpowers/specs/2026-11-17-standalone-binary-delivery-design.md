@@ -1,7 +1,7 @@
 # Standalone Binary Delivery Design
 
 **Date:** 2026-11-17
-**Status:** Proposed
+**Status:** Approved
 
 ## Intent
 
