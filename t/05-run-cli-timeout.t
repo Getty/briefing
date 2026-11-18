@@ -25,6 +25,9 @@ sub child_script {
   return $file;
 }
 my $echo_script = child_script( 'echo', <<'CODE' );
+binmode STDIN;
+binmode STDOUT;
+binmode STDERR;
 local $/;
 print scalar <STDIN>;
 print STDERR "e";
