@@ -10,6 +10,7 @@ temporary directory. Runtime tests are native-Windows evidence and are skipped
 elsewhere; the reproducible cross-build test runs on any host with ziglang.
 """
 
+import faulthandler
 import hashlib
 import http.server
 import importlib.util
@@ -44,69 +45,185 @@ ASSETS = (
     "briefing-0.001-windows-x86_64.exe",
 )
 WINDOWS_ASSET = ASSETS[-1]
+# Loopback-only self-signed end-entity certificate (CA:FALSE, serverAuth, SAN localhost and
+# 127.0.0.1 only), valid to 2036, so that even a leftover trust entry can only vouch for
+# loopback. Generated with:
+#   openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 3650 \
+#     -subj "/CN=briefing-bootstrap-local-test-leaf" \
+#     -addext "basicConstraints=critical,CA:FALSE" \
+#     -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+#     -addext "extendedKeyUsage=serverAuth" \
+#     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 TEST_CERTIFICATE = """-----BEGIN CERTIFICATE-----
-MIIDTTCCAjWgAwIBAgIUJnblzbjvKP9xie636MuCkDT4UX0wDQYJKoZIhvcNAQEL
-BQAwKDEmMCQGA1UEAwwdYnJpZWZpbmctYm9vdHN0cmFwLWxvY2FsLXRlc3QwHhcN
-MjYxMTE3MjMzNDU0WhcNMzYxMTE0MjMzNDU0WjAoMSYwJAYDVQQDDB1icmllZmlu
-Zy1ib290c3RyYXAtbG9jYWwtdGVzdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCC
-AQoCggEBANMseYPOChKxuIwuD7qGGvs5FS85bYMHY2qGyTHno+/a4HvYLF9lVA+O
-WjVHTM06KYpyW4pfnXTq19NdDJL5Bc+vtRiPtBMvVtV8SBU3eDV10KNkoJn0+R4B
-ZZyZxzbOkRCFOGcIRPIHW8h/FqdVRWxksvJbxi4eQHCuZrrZJw1viEr0XI+1JgUc
-QK78vDbGes7WK1wtfBJf5osxuM+L/qmhbQrQF0Y3xIzqEqq6280H10Yq5TMFv4bC
-bYWblxwKIhwfvT4E1v3Q7QMZULvZBF+Vq3W1MMnwI7m5yv4Fg/X70c2YgQw54S4q
-PbTEzJsrtkURwXdrB4Df+YMavx206pECAwEAAaNvMG0wHQYDVR0OBBYEFAXNRVaU
-Dh4/D82VaRGYvX0M0IUHMB8GA1UdIwQYMBaAFAXNRVaUDh4/D82VaRGYvX0M0IUH
-MBoGA1UdEQQTMBGCCWxvY2FsaG9zdIcEfwAAATAPBgNVHRMBAf8EBTADAQH/MA0G
-CSqGSIb3DQEBCwUAA4IBAQCuYZ86DjU0l8E+iHeAhwSniI09w6uvLjr1q12FHPbV
-ajdsy3hR89z2rlOVVMoExVRSasS7OAw2H5IJIJ/EIFnBC1G4bQAfTUWx5EhhnAdo
-mzIDN0ol1p1XOY9rQc1eOR7cPsF2+sBCXg10rJ4N/TkR4GU9PWiBnanNGnirjFgC
-7Mskj5ql20GVSnRnoyxfNlWPTyDnKX6P0tVDqGEu/NL496p2zSFfuduiPx6H2u5O
-Kv9v8FRZJX5aOROi+dL+6Ke2ixHBpxPSVdsin5Rw4y0cOeofIxZ+E3zZrvUtSf94
-IPUpc8UFCKCrxm4qnkGPI8ZPgHWsVb9mwhh1qC6rEN4L
+MIIDezCCAmOgAwIBAgIUWhK6kquCp4vSY+3xZ+fNodCpAzYwDQYJKoZIhvcNAQEL
+BQAwLTErMCkGA1UEAwwiYnJpZWZpbmctYm9vdHN0cmFwLWxvY2FsLXRlc3QtbGVh
+ZjAeFw0yNjExMTgwNzEzMzlaFw0zNjExMTUwNzEzMzlaMC0xKzApBgNVBAMMImJy
+aWVmaW5nLWJvb3RzdHJhcC1sb2NhbC10ZXN0LWxlYWYwggEiMA0GCSqGSIb3DQEB
+AQUAA4IBDwAwggEKAoIBAQDCGU1zwc4NrbZOoPXBgeSKclOcLfQSUfZQmNUu2GEO
+1uRp3qf2EvlZNvckGA26LoJ6lX8x5SQCNpYMBZ6yf3HVmnm6w/6anGdeWRcqHKSk
+hEuFouiVkpT+E0VlrcsPlnfFwFjnxlJDE285g5VcriIvMm06PeejBzwjvggO5Gqa
+memgkGFuOiaVM5URObYPaa5q4b/oQWEuKZMSBeInCXAX7tGVOlMq1A18/Qc8BRQW
+eVfBSLL3i99N0PooanAEsgzayo4831QU1SiUnznSOQX7bjPggaTHQMrk7q7MQVJA
+qXNh5/7f14eU0lGns5bDHN2e6Nq+v1qym+rBuu5MjJARAgMBAAGjgZIwgY8wHQYD
+VR0OBBYEFP/10UbGGTRu/5V9BIxtx36kgJVEMB8GA1UdIwQYMBaAFP/10UbGGTRu
+/5V9BIxtx36kgJVEMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQDAgWgMBMGA1Ud
+JQQMMAoGCCsGAQUFBwMBMBoGA1UdEQQTMBGCCWxvY2FsaG9zdIcEfwAAATANBgkq
+hkiG9w0BAQsFAAOCAQEAYYm4MvhBFUrSLmFzPGwItHfawKpF84S2m0qe6D2xQ+KJ
+0fZlb51dUrnk2SWAIVOG8Ph/2p0zv6xe2fEj8clT4JTxKMWKbTw1E8ApEtMSlKFx
+fj8mtf7F/rqERWE4Fvcuje77ea6bgKX+gUchT052oPgCCzViPDjQzYu6xUEhEPiy
+emzJ+JJBGPznMC5WytfkqmoPQwkl87fo2LrKB6kgXGCVeEJe0h0V7ve1cYGM9PFf
+zbV6DnAwYSZXk1aI5XNU/mP1aA+tfaYG4AYZGn40Qf3fUdUP4ecq9IrOHeObaFV/
+ovlwWmx4VEoafOc7dfjaVTVxiawnZhzQV/fbU/UdfA==
 -----END CERTIFICATE-----
 """
 TEST_PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDTLHmDzgoSsbiM
-Lg+6hhr7ORUvOW2DB2Nqhskx56Pv2uB72CxfZVQPjlo1R0zNOimKcluKX5106tfT
-XQyS+QXPr7UYj7QTL1bVfEgVN3g1ddCjZKCZ9PkeAWWcmcc2zpEQhThnCETyB1vI
-fxanVUVsZLLyW8YuHkBwrma62ScNb4hK9FyPtSYFHECu/Lw2xnrO1itcLXwSX+aL
-MbjPi/6poW0K0BdGN8SM6hKqutvNB9dGKuUzBb+Gwm2Fm5ccCiIcH70+BNb90O0D
-GVC72QRflat1tTDJ8CO5ucr+BYP1+9HNmIEMOeEuKj20xMybK7ZFEcF3aweA3/mD
-Gr8dtOqRAgMBAAECggEACRhm/XEDSKdxIILrxRr5XSB2xwUGsF7B/rivQFNO4Zaz
-fEuk+AQU8q/GnXlxZEkUHyhQxNN2Csib1h8xjcAxapVE5aA4eQRDdBUS97le/iwR
-k4M5UmUInvm5bV0t0hb9WYROl+V1YfIRZAyeDN2X2WGdV+Hxb1NFoqgB7BwZQGaD
-j10b8mwoUgN785/Ikkra97T6ThFNcPA0bR162eXAFpsnAD+bZBU58w82kkyRCEQR
-n66Pwe91jAXIirXjmFVUiXFVKmBA8vNLCL67USKrwqhonvc6jR1yXyKkxk0Esb9C
-wh38AymLrqzMufc5CNi2HIqli5Vh0Xy6Bm+WGmh9PwKBgQD/FwA0D0Yyybs/8r5v
-99A0d+jcg9j5C2KTEfjGT6KIjJuN8h/x/LqPdTFjSokORGhbGiIqMhif24/V0f/y
-rEBm+5Ij89wMxH2Bcem1qrdeagvihjZzRNWTCcq5CBIrvLros5uYZ2Bx8SwmuUi0
-wGXM+ifI/Nyv01tFd88MoYwBvwKBgQDT7Vxhyi9OhsWYDm0rJSOiVUypbzmX374N
-dNwLScbolNM6SdopCJsD7doKDMDVGofAZV8qrLBVZakKkLKDwgIeIWPoBQ7wqM1g
-ex+Va3HnNdoF8Cu31qxrXAg38GaZHirjxVASZRiESUrMTK/jWuHd5ZFmljS4HWJt
-3nlZQuyHrwKBgC9GogED+6yZ+pwlbuntcabnuj50KRgu5fv/zq1iQOsxs/qgrw74
-GdNQkvCl9bSxNO39b+uGEU4/MO8d1mOxTNZJNZJ4NYYgPGprJDdJBmb3HHDFEv5V
-+Ycgv3N/bW6xsapC70lVj2hOnDIpELJ/Hd7ZVdpIEtZ7Q2UiiTr8DaidAoGAbh4G
-g5Vv8UicAT91wBZjJqVV2TA+58hNU2amM4NZRF6YRtA6+FlNWsRLKC+qPtCzOugx
-g9YJJcZWCHRZHZdATHGjHNsMAUZkuL4hEh2rKK1VpQI/ZR25p2tBpfdXCDahqIpM
-6dH35DzFDdTHC8acWBVB8OEZcZVrIJWZziS1DGcCgYEAmMV90vtk5osZw47YSQO1
-MRZhOJAyknilmtI31bW+vYBEJcsxRkMAmpCuZXarN0sXsxZQxvHKaOVV/Rlfbwmy
-uPkrlim+rPTzlGCgB+mf0X4Yzb5qlV3HvcyiPo+ykoLvSVJlfVhpUMTEniGOFmxs
-kJtnkQfWEeNTldi9Fsieco8=
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDCGU1zwc4NrbZO
+oPXBgeSKclOcLfQSUfZQmNUu2GEO1uRp3qf2EvlZNvckGA26LoJ6lX8x5SQCNpYM
+BZ6yf3HVmnm6w/6anGdeWRcqHKSkhEuFouiVkpT+E0VlrcsPlnfFwFjnxlJDE285
+g5VcriIvMm06PeejBzwjvggO5GqamemgkGFuOiaVM5URObYPaa5q4b/oQWEuKZMS
+BeInCXAX7tGVOlMq1A18/Qc8BRQWeVfBSLL3i99N0PooanAEsgzayo4831QU1SiU
+nznSOQX7bjPggaTHQMrk7q7MQVJAqXNh5/7f14eU0lGns5bDHN2e6Nq+v1qym+rB
+uu5MjJARAgMBAAECggEAE3/nQBHgWY9yGUQibGZYR3Bk5fPX6V9Cl6ZDBInIdm0w
+VVKBHT+avVPAUGf6ORIjGZ2bQa/7hh1lxZ9q6hPTo9n5EMJP+chsuhXJNfnasIx5
+6dsL8rrfLQdSmXx0QgSj08IXLHHIIeT575VAlCcKWCOAxbEibEZ1zEFzHcvkydMv
+tf25/czc9ebjTx9Hpx8WCNWV3KHiCZjSDYoD2Xrw2heZmHbEgSQK9QGSJ2GVGAG2
+tu8PwwC8KBo40jh0bs/SVNugLyuHTLzjoH0wQ30KQQK1iDRxnCk/zyXOKRo9xdUj
+h3tA8/TRgjXKcdqolgm1iSsRZ69lpWzfgA8uxj74gQKBgQDvd5Pah3SmlXeHsAn8
+1wpnYOgCSbg13VjNo+raaBpT6gLlDdcatNxzs7JXXpPZ+ohxm/TJONqYZyyqT9Y7
+reIHcMXS1uN3dFdqbN8R8xYUqRFDRe1pDxbB1KRYbDNy/+eXOENj4bWXwuhg8Uxd
+X+PVQjxMK00nkppXeXgzVsilfQKBgQDPf976KqBgeYTytMKXEOq93aopKKe0W0fD
+oKZUcOfddhG6wdopiJv9mEeb65sLsylABCGSkZHkkwfQc2+NVHhCMwpyMPWzPvep
+ujoPlTWxoX1YsdTc0s3O4Wnb3HYetKsZkoQ9FYxqua25q1Fa9GWvmU6Eg9yvXEDW
+5qPTUoxJJQKBgQDeKYD5T4vwdGCFeNN7SAG18Rit7rjA+E7H0Zgz8jriuQrgeFuk
+wkB38zG0juD6bM0jIX4TJPTgSXANva3ShjpZjs1pEsXLcBsdeE3nuC83EbcbQ4fD
+XSVOxDmIczG0MigoiiEzTBaN6lxue87OHgUgN6f7Pn0BBqi8GMxkTNIvfQKBgAjE
+XVZykJ4i5EQg8QvS8igdgoAEsLlFFg4k7oIo1xMbVvpuEFqq4/ReB8CFvuJKqpaC
+1ixMLD7dG3pqNi9hf0dEws86VFdDdNFeBe/8nO0pZpNlyBmgaoOwMHnSoccAWS5W
+a3HtRCaKO9XZcDGIm/dEYfXlYGCkZDTwP8HA/h5lAoGBAOa9iXf7bkkv/Edhk9H0
+JoE2P3t65Ed35pjDJPpf527ZbovNdHbxWxGN90d2Mm7iL8hMvCvPI0xhrHZbb1E4
+UE4zWa2FlOhN9l+fSTGNWcH8PXTedW+C4584s4t36cJEESQ6M0VhrWGNyXy/cAym
+P8Knf8JlVtE4XMjsNUgu33Am
 -----END PRIVATE KEY-----
 """
+
+
+def _text(data):
+    if data is None:
+        return ""
+    if isinstance(data, bytes):
+        return data.decode("utf-8", "replace")
+    return str(data)
+
+
+def canonical_path(path):
+    """One spelling per directory entry: long form, real case, no alias.
+
+    The bootstrap may hand a child the 8.3 alias (C:\\Users\\RUNNER~1\\...) of a long
+    path; a test that compares such a path with a resolve()d one compares identity,
+    not text. Comparison keys are used only for paths that exist.
+    """
+    path = str(path)
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            buffer = ctypes.create_unicode_buffer(32768)
+            length = ctypes.windll.kernel32.GetLongPathNameW(path, buffer, 32768)
+            if 0 < length < 32768:
+                path = buffer.value
+        except (OSError, AttributeError):
+            pass
+    return os.path.normcase(os.path.realpath(path))
+
+
+def canonical_arg(argument):
+    """Canonicalise a path-valued argument; leave switches and plain words alone.
+
+    The fallbacks receive the plugin paths in the spelling the bootstrap was launched
+    with (the 8.3 form on a Windows runner), so paths are compared by identity.
+    """
+    if argument.startswith("-I") and len(argument) > 2:
+        return "-I" + canonical_path(argument[2:])
+    if os.path.isabs(argument):
+        return canonical_path(argument)
+    return argument
+
+
+def canonical_args(arguments):
+    return [canonical_arg(argument) for argument in arguments]
+
+
+def describe_output(stdout, stderr, returncode=None):
+    """Return one message fragment carrying a run's exit code and both streams."""
+    return "exit=%r\nstdout:\n%s\nstderr:\n%s" % (returncode, _text(stdout), _text(stderr))
+
+
+def kill_tree(process):
+    """Kill a process and, on Windows, its descendants that may hold the pipes open."""
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
+def communicate_bounded(process, input_bytes=b"", timeout=30, label="process"):
+    """communicate() that turns a hang into an AssertionError carrying partial output.
+
+    After the timeout the whole process tree is killed and the drained pipes are read
+    once more with a second, short bound, so a descendant holding a pipe cannot hang
+    the run a second time.
+    """
+    try:
+        return process.communicate(input_bytes, timeout=timeout)
+    except subprocess.TimeoutExpired as expired:
+        stdout, stderr = expired.stdout, expired.stderr
+        kill_tree(process)
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired as again:
+            stdout = again.stdout if again.stdout is not None else stdout
+            stderr = again.stderr if again.stderr is not None else stderr
+        raise AssertionError(
+            "%s did not finish within %ss and was killed\n%s"
+            % (label, timeout, describe_output(stdout, stderr, process.returncode))
+        )
+
+
+def run_bounded(command, timeout, label=None, input_bytes=None, **kwargs):
+    """subprocess.run replacement with the bounded, reporting hang handling above."""
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE if input_bytes is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        **kwargs
+    )
+    try:
+        stdout, stderr = communicate_bounded(
+            process, input_bytes if input_bytes is not None else None,
+            timeout=timeout, label=label or str(command[0]))
+    finally:
+        kill_tree(process)
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def build_executable(output, source=None):
     command = [sys.executable, str(BUILD), str(output)]
     if source is not None:
         command.extend(("--src", str(source)))
-    result = subprocess.run(
-        command,
-        cwd=str(REPO_ROOT),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=120,
-    )
+    result = run_bounded(command, 120, label="executable build", cwd=str(REPO_ROOT))
     if result.returncode != 0:
         raise AssertionError(
             "build failed (%s):\nstdout:\n%s\nstderr:\n%s"
@@ -179,6 +296,10 @@ class AssetServer:
         paths = self.paths
 
         class Handler(http.server.BaseHTTPRequestHandler):
+            # A client that connects and never speaks (or never finishes a TLS
+            # handshake) must not pin a handler thread forever.
+            timeout = 15
+
             def do_GET(handler_self):
                 paths.append(handler_self.path)
                 if hold_requests and len(paths) >= hold_requests:
@@ -221,7 +342,12 @@ class AssetServer:
             private_key.write_text(TEST_PRIVATE_KEY, encoding="ascii")
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(str(certificate), str(private_key))
-            self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+            # The handshake runs lazily in the handler thread: an eager handshake in
+            # accept() would stall serve_forever, and with it shutdown(), whenever a
+            # client opens a connection and never completes it.
+            self.server.socket = context.wrap_socket(
+                self.server.socket, server_side=True, do_handshake_on_connect=False
+            )
             self.scheme = "https"
             self.host = "127.0.0.1"
         self.thread = threading.Thread(target=self.server.serve_forever)
@@ -243,7 +369,12 @@ class AssetServer:
             return
         self._stopped = True
         self.release_requests.set()
-        self.server.shutdown()
+        # shutdown() blocks until serve_forever returns; bound it so cleanup of a
+        # wedged server cannot hang the whole run.
+        stopper = threading.Thread(target=self.server.shutdown)
+        stopper.daemon = True
+        stopper.start()
+        stopper.join(timeout=10)
         self.thread.join(timeout=5)
         self.server.server_close()
 
@@ -403,16 +534,70 @@ class TokenOwnerControl:
 
 
 class TrustedTestRoot:
+    """Trust the test CA in the LocalMachine ROOT store, non-interactively.
+
+    The CurrentUser ROOT store is deliberately not used: Windows confirms an addition
+    there with a modal security dialog that a headless runner can never answer, which
+    hangs the test forever. LocalMachine needs an elevated process (the CI runner is);
+    without one, unavailable() names the reason and the TLS-dependent tests skip.
+    """
+
+    CERT_STORE_PROV_SYSTEM_W = 10
+    CERT_SYSTEM_STORE_LOCAL_MACHINE = 0x00020000
+
     def __init__(self):
         self.store = None
         self.context = None
+
+    @classmethod
+    def _open_store(cls, crypt32):
+        import ctypes
+
+        crypt32.CertOpenStore.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint, ctypes.c_wchar_p
+        ]
+        crypt32.CertOpenStore.restype = ctypes.c_void_p
+        return crypt32.CertOpenStore(
+            cls.CERT_STORE_PROV_SYSTEM_W, 0, None, cls.CERT_SYSTEM_STORE_LOCAL_MACHINE, "ROOT"
+        )
+
+    @classmethod
+    def unavailable(cls):
+        """Return None when the test certificate may be trusted, else the skip reason.
+
+        Trusting is machine-wide and so opt-in: it happens only on GitHub Actions or with
+        BRIEFING_BOOTSTRAP_TRUST_TEST_ROOT=1, and needs a writable LocalMachine ROOT store.
+        """
+        if os.name != "nt":
+            return "the Windows certificate store exists only on Windows"
+        if (os.environ.get("GITHUB_ACTIONS") != "true"
+                and os.environ.get("BRIEFING_BOOTSTRAP_TRUST_TEST_ROOT") != "1"):
+            return (
+                "skipped: trusting the loopback test certificate in the machine-wide "
+                "LocalMachine ROOT store is opt-in; set BRIEFING_BOOTSTRAP_TRUST_TEST_ROOT=1 "
+                "(it is set automatically on GitHub Actions)"
+            )
+        import ctypes
+
+        crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+        crypt32.CertCloseStore.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        crypt32.CertCloseStore.restype = ctypes.c_int
+        store = cls._open_store(crypt32)
+        if not store:
+            error = ctypes.get_last_error()
+            return (
+                "skipped: the LocalMachine ROOT certificate store is not writable "
+                "(error %d; the process is not elevated), so the test certificate cannot be "
+                "trusted non-interactively; the CurrentUser store is never used because "
+                "it raises a modal dialog" % error
+            )
+        crypt32.CertCloseStore(store, 0)
+        return None
 
     def __enter__(self):
         import ctypes
 
         crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
-        crypt32.CertOpenSystemStoreW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
-        crypt32.CertOpenSystemStoreW.restype = ctypes.c_void_p
         crypt32.CertAddEncodedCertificateToStore.argtypes = [
             ctypes.c_void_p,
             ctypes.c_uint,
@@ -427,7 +612,7 @@ class TrustedTestRoot:
         crypt32.CertCloseStore.argtypes = [ctypes.c_void_p, ctypes.c_uint]
         crypt32.CertCloseStore.restype = ctypes.c_int
         self._crypt32 = crypt32
-        self.store = crypt32.CertOpenSystemStoreW(None, "ROOT")
+        self.store = self._open_store(crypt32)
         if not self.store:
             raise ctypes.WinError(ctypes.get_last_error())
         der = ssl.PEM_cert_to_DER_cert(TEST_CERTIFICATE)
@@ -688,6 +873,10 @@ class BootstrapProcessTests(unittest.TestCase):
         cls.cwd.mkdir()
 
     def setUp(self):
+        # Diagnostic watchdog: a test stuck beyond every bound below dumps all thread
+        # stacks to stderr, so the log names the hang instead of ending silently.
+        faulthandler.dump_traceback_later(240, exit=False)
+        self.addCleanup(faulthandler.cancel_dump_traceback_later)
         try:
             self.pin_file.unlink()
         except OSError:
@@ -792,9 +981,10 @@ class BootstrapProcessTests(unittest.TestCase):
         )
 
     def assert_safe_hook_warning(self, result):
-        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
-        self.assertEqual(result.stderr, b"")
-        self.assertEqual(len(result.stdout.splitlines()), 1, result.stdout)
+        detail = describe_output(result.stdout, result.stderr, result.returncode)
+        self.assertEqual(result.returncode, 0, detail)
+        self.assertEqual(result.stderr, b"", detail)
+        self.assertEqual(len(result.stdout.splitlines()), 1, detail)
         output = json.loads(result.stdout.decode("utf-8"))
         self.assertEqual(set(output), {"systemMessage"})
         self.assertRegex(
@@ -803,9 +993,10 @@ class BootstrapProcessTests(unittest.TestCase):
         )
 
     def assert_non_hook_failure(self, result):
-        self.assertEqual(result.returncode, 1, result.stderr.decode("utf-8", "replace"))
-        self.assertEqual(result.stdout, b"")
-        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        detail = describe_output(result.stdout, result.stderr, result.returncode)
+        self.assertEqual(result.returncode, 1, detail)
+        self.assertEqual(result.stdout, b"", detail)
+        self.assertEqual(len(result.stderr.splitlines()), 1, detail)
         self.assertRegex(
             result.stderr.decode("utf-8").rstrip("\r\n"),
             r"^briefing: no binary \(.+\) and no fallback \(.+\)\.$",
@@ -828,7 +1019,8 @@ class BootstrapProcessTests(unittest.TestCase):
         record = []
         for field in fields[:-1]:
             if field == b"":
-                records.append([value.decode("utf-8") for value in record])
+                values = [value.decode("utf-8") for value in record]
+                records.append(values[:1] + canonical_args(values[1:]))
                 record = []
             else:
                 record.append(field)
@@ -837,12 +1029,9 @@ class BootstrapProcessTests(unittest.TestCase):
 
     def create_junction(self, link, target):
         command = os.environ.get("COMSPEC", r"C:\Windows\System32\cmd.exe")
-        result = subprocess.run(
+        result = run_bounded(
             [command, "/d", "/c", "mklink", "/J", str(link), str(target)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=10,
-        )
+            20, label="mklink /J")
         self.assertEqual(
             result.returncode,
             0,
@@ -898,8 +1087,9 @@ class BootstrapProcessTests(unittest.TestCase):
         return data.replace(b"started\n", b"foreign\n", 1)
 
     def assert_verified_bytes_or_safe_hook_fallback(self, result, marker):
-        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
-        self.assertEqual(result.stderr, b"")
+        detail = describe_output(result.stdout, result.stderr, result.returncode)
+        self.assertEqual(result.returncode, 0, detail)
+        self.assertEqual(result.stderr, b"", detail)
         if marker.exists():
             self.assertEqual(
                 marker.read_bytes(),
@@ -937,23 +1127,23 @@ class BootstrapProcessTests(unittest.TestCase):
         return cached, par, child_directory, child_file
 
     def run_bootstrap(self, args=(), input_bytes=b"", cwd=None, env=None):
-        return subprocess.run(
+        return run_bounded(
             [str(self.bootstrap), *args],
+            30,
+            label="briefing-bootstrap " + " ".join(args),
+            input_bytes=input_bytes,
             cwd=str(cwd or self.cwd),
             env=env or self.environment("exit", BRIEFING_BOOTSTRAP_STUB_EXIT="0"),
-            input=input_bytes,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30,
         )
 
     def assert_rejected_before_child_start(self, result, marker):
-        self.assertEqual(result.returncode, 1, result.stderr.decode("utf-8", "replace"))
-        self.assertEqual(result.stdout, b"")
+        detail = describe_output(result.stdout, result.stderr, result.returncode)
+        self.assertEqual(result.returncode, 1, detail)
+        self.assertEqual(result.stdout, b"", detail)
         self.assertTrue(
             result.stderr.startswith(b"briefing-bootstrap:"),
-            "rejection must be a graceful bootstrap error, not a process crash: %r"
-            % result.stderr,
+            "rejection must be a graceful bootstrap error, not a process crash: "
+            + detail,
         )
         self.assertFalse(marker.exists(), "rejected input must not start the child")
 
@@ -981,8 +1171,8 @@ class BootstrapProcessTests(unittest.TestCase):
         decoded = [field.decode("utf-8") for field in fields[:-1]]
         self.assertEqual(len(decoded), len(arguments) + 2)
         self.assertEqual(
-            os.path.normcase(os.path.normpath(decoded[0])),
-            os.path.normcase(os.path.normpath(str(self.cwd.resolve()))),
+            canonical_path(decoded[0]),
+            canonical_path(str(self.cwd.resolve())),
         )
         self.assertEqual(decoded[1], environment_value)
         self.assertEqual(decoded[2:], arguments)
@@ -1021,10 +1211,11 @@ class BootstrapProcessTests(unittest.TestCase):
         par = Path(first.stdout.decode("utf-8"))
         expected = Path(str(self.child.resolve()) + ".par")
         self.assertEqual(
-            os.path.normcase(os.path.normpath(str(par))),
-            os.path.normcase(os.path.normpath(str(expected))),
+            canonical_path(str(par)),
+            canonical_path(str(expected)),
         )
-        relative = par.relative_to(self.config.resolve())
+        relative = Path(canonical_path(par)).relative_to(
+            Path(canonical_path(self.config.resolve())))
         self.assertEqual(relative.parts[:2], ("briefing", "bin"))
         self.assertRegex(relative.parts[2], re.compile(r"^[0-9][A-Za-z0-9._+-]*$"))
 
@@ -1183,7 +1374,7 @@ class BootstrapProcessTests(unittest.TestCase):
         cached = self.cached_path(digest=digest)
         self.assertEqual(cached.read_bytes(), data)
 
-    def test_production_rejects_plain_http_and_tls_downgrade(self):
+    def test_production_rejects_plain_http_origin(self):
         data = self.fixture.read_bytes()
         digest = sha256(data)
         self.write_manifest(self.canonical_manifest(data=data))
@@ -1198,6 +1389,14 @@ class BootstrapProcessTests(unittest.TestCase):
         self.assertFalse(self.marker.exists(), "plain-HTTP bytes were executed")
         self.assert_no_trusted_cache_entry(digest)
         self.assert_safe_hook_warning(plain_result)
+
+    def test_production_rejects_tls_downgrade(self):
+        unavailable = TrustedTestRoot.unavailable()
+        if unavailable is not None:
+            self.skipTest(unavailable)
+        data = self.fixture.read_bytes()
+        digest = sha256(data)
+        self.write_manifest(self.canonical_manifest(data=data))
 
         self.use_production_config("tls-downgrade")
         downgrade_target = AssetServer(self, data=data)
@@ -1360,11 +1559,11 @@ class BootstrapProcessTests(unittest.TestCase):
 
         release.write_bytes(b"release\n")
         try:
-            stdout, stderr = process.communicate(b"", timeout=30)
+            stdout, stderr = communicate_bounded(process, label="bootstrap process")
         finally:
             if process.poll() is None:
                 process.kill()
-                process.wait()
+                process.wait(timeout=10)
 
         if swap_error is not None:
             raise swap_error
@@ -1463,11 +1662,11 @@ class BootstrapProcessTests(unittest.TestCase):
                 swap_error = error
         release.write_bytes(b"release\n")
         try:
-            stdout, stderr = process.communicate(b"", timeout=30)
+            stdout, stderr = communicate_bounded(process, label="bootstrap process")
         finally:
             if process.poll() is None:
                 process.kill()
-                process.wait()
+                process.wait(timeout=10)
         if swap_error is not None:
             raise swap_error
 
@@ -1538,11 +1737,11 @@ class BootstrapProcessTests(unittest.TestCase):
                 swap_error = error
         release.write_bytes(b"release\n")
         try:
-            stdout, stderr = process.communicate(b"", timeout=30)
+            stdout, stderr = communicate_bounded(process, label="bootstrap process")
         finally:
             if process.poll() is None:
                 process.kill()
-                process.wait()
+                process.wait(timeout=10)
         if swap_error is not None:
             raise swap_error
 
@@ -1621,11 +1820,11 @@ class BootstrapProcessTests(unittest.TestCase):
                 swap_error = error
         release.write_bytes(b"release\n")
         try:
-            stdout, stderr = process.communicate(b"", timeout=30)
+            stdout, stderr = communicate_bounded(process, label="bootstrap process")
         finally:
             if process.poll() is None:
                 process.kill()
-                process.wait()
+                process.wait(timeout=10)
         if swap_error is not None:
             raise swap_error
 
@@ -1710,11 +1909,11 @@ class BootstrapProcessTests(unittest.TestCase):
                 swap_error = error
         release.write_bytes(b"release\n")
         try:
-            stdout, stderr = process.communicate(b"", timeout=30)
+            stdout, stderr = communicate_bounded(process, label="bootstrap process")
         finally:
             if process.poll() is None:
                 process.kill()
-                process.wait()
+                process.wait(timeout=10)
         if swap_error is not None:
             raise swap_error
 
@@ -1897,7 +2096,7 @@ class BootstrapProcessTests(unittest.TestCase):
         winner_reached = self.wait_for_path(winner_ready, timeout=10)
         if not winner_reached:
             winner_release.write_bytes(b"release\n")
-            stdout, stderr = winner.communicate(b"", timeout=30)
+            stdout, stderr = communicate_bounded(winner, label="bootstrap process")
             self.fail(
                 "winner never held the installed read/delete handle: stdout=%r stderr=%r"
                 % (stdout, stderr)
@@ -1928,18 +2127,18 @@ class BootstrapProcessTests(unittest.TestCase):
 
         winner_release.write_bytes(b"release\n")
         try:
-            winner_stdout, winner_stderr = winner.communicate(b"", timeout=30)
+            winner_stdout, winner_stderr = communicate_bounded(winner, label="bootstrap process")
         finally:
             if winner.poll() is None:
                 winner.kill()
-                winner.wait()
+                winner.wait(timeout=10)
         loser_release.write_bytes(b"release\n")
         try:
-            loser_stdout, loser_stderr = loser.communicate(b"", timeout=30)
+            loser_stdout, loser_stderr = communicate_bounded(loser, label="bootstrap process")
         finally:
             if loser.poll() is None:
                 loser.kill()
-                loser.wait()
+                loser.wait(timeout=10)
 
         self.assertTrue(
             loser_reached,
@@ -2011,13 +2210,13 @@ class BootstrapProcessTests(unittest.TestCase):
         concurrent_server.release_requests.set()
         try:
             for process in processes:
-                stdout, stderr = process.communicate(b"", timeout=30)
+                stdout, stderr = communicate_bounded(process, label="bootstrap process")
                 results.append((process.returncode, stdout, stderr))
         finally:
             for process in processes:
                 if process.poll() is None:
                     process.kill()
-                    process.wait()
+                    process.wait(timeout=10)
 
         self.assertTrue(ready, "both concurrent provisions did not reach the downloader")
         self.assertEqual(
@@ -2144,12 +2343,12 @@ class BootstrapProcessTests(unittest.TestCase):
             records = self.invocation_records(log)
             self.assertEqual(len(records), 1, records)
             self.assertEqual(
-                os.path.normcase(os.path.normpath(records[0][0])),
-                os.path.normcase(os.path.normpath(str(python.resolve()))),
+                canonical_path(records[0][0]),
+                canonical_path(str(python.resolve())),
             )
             self.assertEqual(
                 records[0][1:],
-                [str((self.plugin / "hooks" / "briefing-preload").resolve())],
+                canonical_args([str((self.plugin / "hooks" / "briefing-preload").resolve())]),
             )
 
         with self.subTest(command="hook-no-runtime"):
@@ -2184,22 +2383,22 @@ class BootstrapProcessTests(unittest.TestCase):
             include = "-I" + str((self.plugin / "lib").resolve())
             records = self.invocation_records(log)
             self.assertEqual(len(records), 2, records)
-            executable = os.path.normcase(os.path.normpath(str(perl.resolve())))
+            executable = canonical_path(str(perl.resolve()))
             for record in records:
                 self.assertEqual(
-                    os.path.normcase(os.path.normpath(record[0])), executable
+                    canonical_path(record[0]), executable
                 )
             self.assertEqual(
                 records[0][1:],
-                [include, "-e", "require App::Briefing::CLI"],
+                canonical_args([include, "-e", "require App::Briefing::CLI"]),
             )
             self.assertEqual(
                 records[1][1:],
-                [
+                canonical_args([
                     include,
                     str((self.plugin / "script" / "briefing").resolve()),
                     *arguments,
-                ],
+                ]),
             )
 
     def test_hook_falls_back_to_python_when_provisioning_is_unavailable(self):
@@ -2226,10 +2425,13 @@ class BootstrapProcessTests(unittest.TestCase):
         records = self.invocation_records(log)
         self.assertEqual(len(records), 1, records)
         self.assertEqual(
-            os.path.normcase(os.path.normpath(records[0][0])),
-            os.path.normcase(os.path.normpath(str(python.resolve()))),
+            canonical_path(records[0][0]),
+            canonical_path(str(python.resolve())),
         )
-        self.assertEqual(records[0][1:], [str((self.plugin / "hooks" / "briefing-preload").resolve())])
+        self.assertEqual(
+            records[0][1:],
+            canonical_args([str((self.plugin / "hooks" / "briefing-preload").resolve())]),
+        )
 
     def test_cli_falls_back_to_perl_when_provisioning_is_unavailable(self):
         self.use_production_config()
@@ -2253,18 +2455,19 @@ class BootstrapProcessTests(unittest.TestCase):
         self.assertEqual(result.stdout, b"")
         self.assertEqual(result.stderr, b"")
         include = "-I" + str((self.plugin / "lib").resolve())
-        executable = os.path.normcase(os.path.normpath(str(perl.resolve())))
+        executable = canonical_path(str(perl.resolve()))
         records = self.invocation_records(log)
         self.assertEqual(len(records), 2, records)
         for record in records:
-            self.assertEqual(os.path.normcase(os.path.normpath(record[0])), executable)
+            self.assertEqual(canonical_path(record[0]), executable)
         self.assertEqual(
             records[0][1:],
-            [include, "-e", "require App::Briefing::CLI"],
+            canonical_args([include, "-e", "require App::Briefing::CLI"]),
         )
         self.assertEqual(
             records[1][1:],
-            [include, str((self.plugin / "script" / "briefing").resolve()), *arguments],
+            canonical_args(
+                [include, str((self.plugin / "script" / "briefing").resolve()), *arguments]),
         )
 
     def test_hook_without_binary_or_runtime_uses_safe_warning_exit_contract(self):
@@ -2376,7 +2579,7 @@ class BootstrapProcessTests(unittest.TestCase):
         if not log.exists():
             return []
         return [
-            (os.path.normcase(os.path.normpath(record[0])), record[1:])
+            (canonical_path(record[0]), record[1:])
             for record in self.invocation_records(log)
         ]
 
@@ -2393,8 +2596,8 @@ class BootstrapProcessTests(unittest.TestCase):
             self.started_programs(log),
             [
                 (
-                    os.path.normcase(os.path.normpath(str(python.resolve()))),
-                    [str((self.plugin / "hooks" / "briefing-preload").resolve())],
+                    canonical_path(str(python.resolve())),
+                    canonical_args([str((self.plugin / "hooks" / "briefing-preload").resolve())]),
                 )
             ],
             "the WindowsApps stub must never be started; python.exe must be",
@@ -2410,7 +2613,7 @@ class BootstrapProcessTests(unittest.TestCase):
         programs = self.started_programs(log)
         self.assertEqual(
             [program for program, _ in programs],
-            [os.path.normcase(os.path.normpath(str(python3.resolve())))],
+            [canonical_path(str(python3.resolve()))],
         )
 
     def test_python_fallback_uses_the_py_launcher_with_dash_3(self):
@@ -2426,8 +2629,9 @@ class BootstrapProcessTests(unittest.TestCase):
             self.started_programs(log),
             [
                 (
-                    os.path.normcase(os.path.normpath(str(launcher.resolve()))),
-                    ["-3", str((self.plugin / "hooks" / "briefing-preload").resolve())],
+                    canonical_path(str(launcher.resolve())),
+                    canonical_args(
+                        ["-3", str((self.plugin / "hooks" / "briefing-preload").resolve())]),
                 )
             ],
         )

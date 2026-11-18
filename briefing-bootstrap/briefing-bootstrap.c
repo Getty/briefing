@@ -14,6 +14,7 @@
 #include <bcrypt.h>
 #include <aclapi.h>
 
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -382,31 +383,41 @@ static int delete_open_file(HANDLE handle)
     ) != 0;
 }
 
-static int rename_open_file(
-    HANDLE file, HANDLE directory, const wchar_t *name
-)
+/* SetFileInformationByHandle reads FileRenameInfo's FileName as a NUL-terminated Win32 path,
+ * absolute or relative to the process's current directory - not to RootDirectory (see the
+ * FILE_RENAME_INFO documentation; Wine's kernelbase converts it the same way with
+ * RtlDosPathNameToNtPathName_U). The target is therefore a full path, and the caller checks
+ * where the renamed handle ended up. */
+static int rename_open_file(HANDLE file, const wchar_t *target, DWORD *error)
 {
-    size_t name_length = wcslen(name);
+    size_t target_length = wcslen(target);
     size_t header = offsetof(FILE_RENAME_INFO, FileName);
     size_t bytes;
     FILE_RENAME_INFO *rename;
     int ok;
 
-    if (name_length == 0 || name_length > (MAXDWORD - header) / sizeof(wchar_t)) {
+    *error = ERROR_INVALID_PARAMETER;
+    if (target_length == 0 ||
+        target_length >= (MAXDWORD - header) / sizeof(wchar_t)) {
         return 0;
     }
-    bytes = header + name_length * sizeof(wchar_t);
+    bytes = header + (target_length + 1) * sizeof(wchar_t);
+    if (bytes < sizeof(FILE_RENAME_INFO)) {
+        bytes = sizeof(FILE_RENAME_INFO);
+    }
     rename = (FILE_RENAME_INFO *)calloc(1, bytes);
     if (rename == NULL) {
+        *error = ERROR_NOT_ENOUGH_MEMORY;
         return 0;
     }
     rename->ReplaceIfExists = FALSE;
-    rename->RootDirectory = directory;
-    rename->FileNameLength = (DWORD)(name_length * sizeof(wchar_t));
-    memcpy(rename->FileName, name, name_length * sizeof(wchar_t));
+    rename->RootDirectory = NULL;
+    rename->FileNameLength = (DWORD)(target_length * sizeof(wchar_t));
+    memcpy(rename->FileName, target, (target_length + 1) * sizeof(wchar_t));
     ok = SetFileInformationByHandle(
         file, FileRenameInfo, rename, (DWORD)bytes
     ) != 0;
+    *error = ok ? ERROR_SUCCESS : GetLastError();
     free(rename);
     return ok;
 }
@@ -971,13 +982,16 @@ static int run_with_par(
 {
     int original_present;
     wchar_t *original = read_environment(L"PAR_GLOBAL_TEMP", &original_present);
+    DWORD error = ERROR_SUCCESS;
     int ran = 0;
 
     if (original_present < 0) {
         return 0;
     }
     if (!SetEnvironmentVariableW(L"PAR_GLOBAL_TEMP", par_directory)) {
+        error = GetLastError();
         free(original);
+        SetLastError(error);
         return 0;
     }
 
@@ -994,6 +1008,9 @@ static int run_with_par(
             exit_code
         );
     }
+    if (!ran) {
+        error = GetLastError();
+    }
 
     if (original_present) {
         (void)SetEnvironmentVariableW(L"PAR_GLOBAL_TEMP", original);
@@ -1001,6 +1018,9 @@ static int run_with_par(
         (void)SetEnvironmentVariableW(L"PAR_GLOBAL_TEMP", NULL);
     }
     free(original);
+    if (!ran) {
+        SetLastError(error);
+    }
     return ran;
 }
 
@@ -1392,6 +1412,191 @@ static int handles_name_same_object(
     same = handles_same_object(expected, current);
     CloseHandle(current);
     return same;
+}
+
+static int names_same_object(
+    const wchar_t *left, const wchar_t *right, DWORD expected_directory
+)
+{
+    HANDLE handle = open_object(
+        left,
+        FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        expected_directory
+    );
+    int same;
+
+    if (handle == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+    same = handles_name_same_object(right, handle, expected_directory);
+    CloseHandle(handle);
+    return same;
+}
+
+/* The single failure reason of this run that is formatted; why_binary may point here.
+ * Callers pass fixed text only, so the reason never needs JSON escaping. */
+static char formatted_reason[320];
+
+static const char *reason_text(const char *format, ...)
+{
+    va_list arguments;
+    int length;
+
+    va_start(arguments, format);
+    length = vsnprintf(formatted_reason, sizeof(formatted_reason), format, arguments);
+    va_end(arguments);
+    return length < 0 ? "the failure reason cannot be formatted" : formatted_reason;
+}
+
+/* PAR::Packer's Windows loader (myldr in PAR-Packer 1.064) works with narrow ANSI strings: it
+ * finds itself with GetModuleFileNameA, reads PAR_GLOBAL_TEMP from the ANSI environment, joins
+ * paths with '/', and its manifest declares neither longPathAware nor a UTF-8 code page. A path
+ * handed to it must carry no \\?\ prefix (which turns off the '/' translation), be exact in the
+ * ANSI code page and stay below MAX_PATH including what PAR writes beneath PAR_GLOBAL_TEMP. The
+ * long form is used when it qualifies, else its 8.3 alias; callers check that the chosen name
+ * opens the verified object. */
+
+/* The deepest relative path PAR extracts below PAR_GLOBAL_TEMP (45 characters in the 0.001
+ * probe's inc/ tree), with margin. */
+#define PAR_TREE_RESERVE 64
+/* PAR extracts its interpreter as <PAR_GLOBAL_TEMP>\<program name>, first as "<that>.<pid>":
+ * a separator, a dot and up to 20 digits beyond the name. */
+#define PAR_INTERPRETER_SUFFIX 22
+
+static wchar_t *without_extended_prefix(const wchar_t *path)
+{
+    size_t length = wcslen(path);
+    wchar_t *plain;
+
+    if (length < 4 || !is_separator(path[0]) || !is_separator(path[1]) ||
+        path[2] != L'?' || !is_separator(path[3])) {
+        return duplicate_wide(path);
+    }
+    if (length >= 9 &&
+        CompareStringOrdinal(path + 4, 4, L"UNC\\", 4, TRUE) == CSTR_EQUAL) {
+        plain = duplicate_wide(path + 6);
+        if (plain != NULL) {
+            plain[0] = L'\\';
+        }
+        return plain;
+    }
+    if (length >= 7 &&
+        ((path[4] >= L'A' && path[4] <= L'Z') ||
+         (path[4] >= L'a' && path[4] <= L'z')) &&
+        path[5] == L':' && is_separator(path[6])) {
+        return duplicate_wide(path + 4);
+    }
+    return NULL;
+}
+
+/* Converts to the ANSI code page without best-fit or default characters and back. */
+static int ansi_exact(const wchar_t *path)
+{
+    UINT code_page = GetACP();
+    DWORD flags = code_page == CP_UTF8 ? 0 : WC_NO_BEST_FIT_CHARS;
+    BOOL defaulted = FALSE;
+    BOOL *defaulted_pointer = code_page == CP_UTF8 ? NULL : &defaulted;
+    char *narrow = NULL;
+    wchar_t *wide = NULL;
+    int bytes;
+    int length;
+    int exact = 0;
+
+    bytes = WideCharToMultiByte(
+        code_page, flags, path, -1, NULL, 0, NULL, defaulted_pointer
+    );
+    if (bytes <= 0 || defaulted) {
+        return 0;
+    }
+    narrow = (char *)malloc((size_t)bytes);
+    if (narrow == NULL ||
+        WideCharToMultiByte(
+            code_page, flags, path, -1, narrow, bytes, NULL, defaulted_pointer
+        ) != bytes ||
+        defaulted) {
+        goto cleanup;
+    }
+    length = MultiByteToWideChar(
+        code_page, MB_ERR_INVALID_CHARS, narrow, -1, NULL, 0
+    );
+    if (length <= 0) {
+        goto cleanup;
+    }
+    wide = (wchar_t *)malloc((size_t)length * sizeof(wchar_t));
+    if (wide != NULL &&
+        MultiByteToWideChar(
+            code_page, MB_ERR_INVALID_CHARS, narrow, -1, wide, length
+        ) == length &&
+        wcscmp(wide, path) == 0) {
+        exact = 1;
+    }
+
+cleanup:
+    free(wide);
+    free(narrow);
+    return exact;
+}
+
+static int par_loader_accepts(const wchar_t *path, size_t reserve, int *too_long)
+{
+    size_t length = wcslen(path);
+
+    *too_long = length >= MAX_PATH || reserve >= MAX_PATH - length;
+    return !*too_long && ansi_exact(path);
+}
+
+static size_t par_directory_reserve(const wchar_t *program)
+{
+    size_t interpreter = wcslen(path_name(program)) + PAR_INTERPRETER_SUFFIX;
+
+    return interpreter > PAR_TREE_RESERVE ? interpreter : PAR_TREE_RESERVE;
+}
+
+/* The name of path to hand to the PAR loader, or NULL with *why saying which rule failed. */
+static wchar_t *par_loader_path(
+    const wchar_t *path, size_t reserve, const char *label, const char **why
+)
+{
+    wchar_t *candidate = without_extended_prefix(path);
+    wchar_t *alias = NULL;
+    DWORD capacity;
+    DWORD length;
+    int too_long = 0;
+    int alias_too_long = 0;
+
+    if (candidate == NULL) {
+        *why = reason_text("%s has no drive-letter or UNC form for the PAR loader", label);
+        return NULL;
+    }
+    if (par_loader_accepts(candidate, reserve, &too_long)) {
+        return candidate;
+    }
+    free(candidate);
+    candidate = NULL;
+
+    capacity = GetShortPathNameW(path, NULL, 0);
+    if (capacity != 0 && capacity <= 32768) {
+        alias = (wchar_t *)malloc((size_t)capacity * sizeof(wchar_t));
+        if (alias != NULL) {
+            length = GetShortPathNameW(path, alias, capacity);
+            if (length != 0 && length < capacity) {
+                candidate = without_extended_prefix(alias);
+            }
+            free(alias);
+        }
+    }
+    if (candidate != NULL &&
+        par_loader_accepts(candidate, reserve, &alias_too_long)) {
+        return candidate;
+    }
+    free(candidate);
+    *why = reason_text(
+        "%s is %s for the PAR loader and has no usable 8.3 alias",
+        label,
+        too_long ? "too long" : "not exact in the ANSI code page"
+    );
+    return NULL;
 }
 
 static int path_components_safe(const wchar_t *path, int allow_missing_final)
@@ -2710,7 +2915,8 @@ static HANDLE provision_binary(
     struct private_security *security,
     struct cache_lock *cache_lock,
     int testing,
-    ULONGLONG maximum_bytes
+    ULONGLONG maximum_bytes,
+    const char **why
 )
 {
     HANDLE directory_lock = cache_version_directory_handle(cache_lock);
@@ -2721,14 +2927,20 @@ static HANDLE provision_binary(
     wchar_t *temporary_path = NULL;
     wchar_t *bound_destination = NULL;
     wchar_t *bound_par_directory = NULL;
+    wchar_t *warm_program = NULL;
+    wchar_t *warm_par_directory = NULL;
+    wchar_t *installed_path = NULL;
     wchar_t *url = NULL;
     unsigned char actual[HASH_BYTES];
     const wchar_t *warm_arguments[1] = {L"--version"};
     DWORD warm_status = 1;
+    DWORD warm_error = ERROR_SUCCESS;
+    DWORD rename_error = ERROR_SUCCESS;
     DWORD verify_error = ERROR_SUCCESS;
     int installed = 0;
     int binding_valid = 1;
 
+    *why = "the private binary cache lock is no longer valid";
     if (directory_lock == INVALID_HANDLE_VALUE ||
         !cache_lock_valid(cache_lock)) {
         goto cleanup;
@@ -2736,35 +2948,52 @@ static HANDLE provision_binary(
     initial_directory = final_path_by_handle(directory_lock);
     if (initial_directory == NULL ||
         !path_components_safe(initial_directory, 0)) {
+        *why = "the binary cache directory has no safe final path";
         goto cleanup;
     }
     bound_destination = join_path(initial_directory, path_name(destination));
     bound_par_directory = join_path(initial_directory, path_name(par_directory));
     if (bound_destination == NULL || bound_par_directory == NULL) {
+        *why = "cannot construct the bound binary cache paths";
         goto cleanup;
     }
     temporary_path = new_temporary_file(
         initial_directory, pins->windows_asset, security, &temporary
     );
     if (temporary_path == NULL) {
+        *why = "cannot exclusively create a private download file in the binary cache";
         goto cleanup;
     }
     current_directory = final_path_by_handle(directory_lock);
     if (current_directory == NULL ||
         !same_path(initial_directory, current_directory) ||
         !cache_lock_valid(cache_lock)) {
+        *why = "the binary cache changed while the download file was created";
         goto cleanup;
     }
     free(current_directory);
     current_directory = NULL;
 
     url = binary_download_url(pins);
-    if (url == NULL ||
-        !download_url(url, testing, maximum_bytes, temporary) ||
-        !hash_handle(temporary, maximum_bytes, actual) ||
-        !hashes_equal(actual, pins->windows_hash) ||
-        !handles_name_same_object(temporary_path, temporary, 0) ||
+    if (url == NULL) {
+        *why = "cannot construct the binary download URL";
+        goto cleanup;
+    }
+    if (!download_url(url, testing, maximum_bytes, temporary)) {
+        *why = "the download of the pinned Windows binary failed or was refused";
+        goto cleanup;
+    }
+    if (!hash_handle(temporary, maximum_bytes, actual)) {
+        *why = "the downloaded Windows binary cannot be hashed within its size limit";
+        goto cleanup;
+    }
+    if (!hashes_equal(actual, pins->windows_hash)) {
+        *why = "the downloaded Windows binary does not match its pinned checksum";
+        goto cleanup;
+    }
+    if (!handles_name_same_object(temporary_path, temporary, 0) ||
         !cache_lock_valid(cache_lock)) {
+        *why = "the binary cache changed during the download";
         goto cleanup;
     }
     CloseHandle(temporary);
@@ -2778,28 +3007,77 @@ static HANDLE provision_binary(
         !hash_handle(temporary, maximum_bytes, actual) ||
         !hashes_equal(actual, pins->windows_hash) ||
         !handles_name_same_object(temporary_path, temporary, 0) ||
-        !cache_lock_valid(cache_lock) ||
-        !ensure_par_directory(bound_par_directory, security) ||
-        !test_sync_point(testing, L"warm-before-create") ||
+        !cache_lock_valid(cache_lock)) {
+        *why = "the downloaded Windows binary could not be reopened and rechecked";
+        goto cleanup;
+    }
+    if (!ensure_par_directory(bound_par_directory, security)) {
+        *why = "cannot create the private PAR directory beside the binary";
+        goto cleanup;
+    }
+    if (!test_sync_point(testing, L"warm-before-create") ||
         !handles_name_same_object(temporary_path, temporary, 0) ||
         !cache_lock_valid(cache_lock)) {
+        *why = "the binary cache changed before the warm-up";
+        goto cleanup;
+    }
+    warm_program = par_loader_path(
+        temporary_path, 0, "the downloaded binary path", why
+    );
+    if (warm_program == NULL) {
+        goto cleanup;
+    }
+    warm_par_directory = par_loader_path(
+        bound_par_directory,
+        par_directory_reserve(warm_program),
+        "the PAR directory path",
+        why
+    );
+    if (warm_par_directory == NULL) {
+        goto cleanup;
+    }
+    if (!handles_name_same_object(warm_program, temporary, 0) ||
+        !names_same_object(warm_par_directory, bound_par_directory, 1) ||
+        !cache_lock_valid(cache_lock)) {
+        *why = "the PAR loader names do not open the verified download and its PAR directory";
         goto cleanup;
     }
     if (!activate_token_user_owner(security)) {
+        *why = "cannot make the current user the owner of new PAR files";
         goto cleanup;
     }
     {
         int warm_ran = run_with_par(
-            temporary_path,
-            bound_par_directory,
+            warm_program,
+            warm_par_directory,
             1,
             warm_arguments,
             1,
             &warm_status
         );
-        int owner_restored = restore_token_owner(security);
+        int owner_restored;
 
-        if (!warm_ran || warm_status != 0 || !owner_restored) {
+        if (!warm_ran) {
+            warm_error = GetLastError();
+        }
+        owner_restored = restore_token_owner(security);
+        if (!warm_ran) {
+            *why = reason_text(
+                "the warm-up of the downloaded binary could not be started, Windows error %lu",
+                (unsigned long)warm_error
+            );
+            goto cleanup;
+        }
+        if (warm_status != 0) {
+            *why = reason_text(
+                "the --version warm-up of the downloaded binary exited with status %lu, 0x%08lX",
+                (unsigned long)warm_status,
+                (unsigned long)warm_status
+            );
+            goto cleanup;
+        }
+        if (!owner_restored) {
+            *why = "the original process token owner could not be restored after the warm-up";
             goto cleanup;
         }
     }
@@ -2809,6 +3087,7 @@ static HANDLE provision_binary(
         !same_path(initial_directory, current_directory) ||
         !cache_lock_valid(cache_lock) ||
         !handles_name_same_object(temporary_path, temporary, 0)) {
+        *why = "the binary cache changed during the warm-up";
         goto cleanup;
     }
     free(current_directory);
@@ -2826,13 +3105,19 @@ static HANDLE provision_binary(
         !hashes_equal(actual, pins->windows_hash) ||
         !handles_name_same_object(temporary_path, temporary, 0) ||
         !cache_lock_valid(cache_lock)) {
+        *why = "the downloaded Windows binary changed during the warm-up";
         goto cleanup;
     }
 
-    if (rename_open_file(
-            temporary, directory_lock, path_name(destination)
-        )) {
+    /* The rename names the full final path of the locked version directory; the renamed
+     * handle must then be exactly there. */
+    if (rename_open_file(temporary, bound_destination, &rename_error)) {
         installed = 1;
+        installed_path = final_path_by_handle(temporary);
+        if (installed_path == NULL ||
+            !same_path(installed_path, bound_destination)) {
+            binding_valid = 0;
+        }
     }
     if (installed &&
         !test_sync_point(testing, L"install-before-reopen")) {
@@ -2856,11 +3141,27 @@ static HANDLE provision_binary(
     CloseHandle(temporary);
     temporary = INVALID_HANDLE_VALUE;
     if (!binding_valid) {
+        *why = "the binary cache changed while the verified binary was installed";
         goto cleanup;
     }
     verified = open_verified_binary_with_retry(
         bound_destination, pins, security, testing, &verify_error
     );
+    if (verified == INVALID_HANDLE_VALUE) {
+        if (installed) {
+            *why = reason_text(
+                "the installed Windows binary could not be reopened and verified, Windows error %lu",
+                (unsigned long)verify_error
+            );
+        } else {
+            *why = reason_text(
+                "the verified binary could not be renamed into the cache, Windows error %lu, "
+                "and no concurrent install could be verified, Windows error %lu",
+                (unsigned long)rename_error,
+                (unsigned long)verify_error
+            );
+        }
+    }
     if (verified == INVALID_HANDLE_VALUE && installed &&
         !verified_open_retryable(verify_error) && cache_lock_valid(cache_lock)) {
         (void)safe_delete_regular(bound_destination);
@@ -2890,6 +3191,9 @@ cleanup:
         (void)safe_delete_regular(temporary_path);
     }
     free(url);
+    free(installed_path);
+    free(warm_par_directory);
+    free(warm_program);
     free(bound_par_directory);
     free(bound_destination);
     free(temporary_path);
@@ -2985,11 +3289,10 @@ static HANDLE find_binary(
         security,
         cache_lock,
         testing,
-        maximum_bytes
+        maximum_bytes,
+        why_binary
     );
-    if (verified == INVALID_HANDLE_VALUE) {
-        *why_binary = "the pinned Windows binary could not be provisioned safely";
-    } else {
+    if (verified != INVALID_HANDLE_VALUE) {
         *why_binary = NULL;
     }
 
@@ -3374,48 +3677,90 @@ static int run_verified_child(
     int testing,
     size_t argument_count,
     const wchar_t *const *arguments,
-    DWORD *status
+    DWORD *status,
+    const char **why
 )
 {
     wchar_t *program = NULL;
     wchar_t *current_program = NULL;
     wchar_t *par_directory = NULL;
+    wchar_t *loader_program = NULL;
+    wchar_t *loader_par_directory = NULL;
     int ran = 0;
 
-    if (!restore_token_owner(security) || !cache_lock_valid(cache_lock)) {
+    if (!restore_token_owner(security)) {
+        *why = "the original process token owner could not be restored before the start";
+        goto cleanup;
+    }
+    if (!cache_lock_valid(cache_lock)) {
+        *why = "the binary cache changed before the verified binary could be started";
         goto cleanup;
     }
     program = final_path_by_handle(verified);
     if (program == NULL) {
+        *why = "the verified Windows binary has no final path";
         goto cleanup;
     }
     par_directory = append_suffix(program, L".par");
     if (par_directory == NULL ||
-        !ensure_par_directory(par_directory, security) ||
-        !test_sync_point(testing, L"cache-hit-before-create")) {
+        !ensure_par_directory(par_directory, security)) {
+        *why = "cannot create the private PAR directory beside the binary";
+        goto cleanup;
+    }
+    if (!test_sync_point(testing, L"cache-hit-before-create")) {
+        *why = "the test synchronization point failed";
+        goto cleanup;
+    }
+    loader_program = par_loader_path(
+        program, 0, "the cached binary path", why
+    );
+    if (loader_program == NULL) {
+        goto cleanup;
+    }
+    loader_par_directory = par_loader_path(
+        par_directory,
+        par_directory_reserve(loader_program),
+        "the PAR directory path",
+        why
+    );
+    if (loader_par_directory == NULL) {
         goto cleanup;
     }
     current_program = final_path_by_handle(verified);
     if (current_program == NULL || !same_path(program, current_program) ||
         !cache_lock_valid(cache_lock) ||
         !handles_name_same_object(program, verified, 0)) {
+        *why = "the binary cache changed before the verified binary could be started";
         goto cleanup;
     }
     if (!cache_lock_valid(cache_lock) ||
-        !handles_name_same_object(program, verified, 0) ||
-        !test_sync_point(testing, L"final-before-create")) {
+        !handles_name_same_object(loader_program, verified, 0) ||
+        !names_same_object(loader_par_directory, par_directory, 1)) {
+        *why = "the PAR loader names do not open the verified binary and its PAR directory";
+        goto cleanup;
+    }
+    if (!test_sync_point(testing, L"final-before-create")) {
+        *why = "the test synchronization point failed";
         goto cleanup;
     }
     ran = run_with_par(
-        program,
-        par_directory,
+        loader_program,
+        loader_par_directory,
         argument_count,
         arguments,
         0,
         status
     );
+    if (!ran) {
+        *why = reason_text(
+            "the verified Windows binary could not be started, Windows error %lu",
+            (unsigned long)GetLastError()
+        );
+    }
 
 cleanup:
+    free(loader_par_directory);
+    free(loader_program);
     free(par_directory);
     free(current_program);
     free(program);
@@ -3664,12 +4009,12 @@ int wmain(int argc, wchar_t **argv)
                     testing,
                     (size_t)(argc - 1),
                     arguments,
-                    &status
+                    &status,
+                    &why_binary
                 )) {
                 result = (int)status;
                 goto cleanup;
             }
-            why_binary = "the verified Windows binary could not be started";
         }
         CloseHandle(binary_lock);
         binary_lock = INVALID_HANDLE_VALUE;

@@ -330,10 +330,16 @@ class ChainTests(unittest.TestCase):
         result = self.run_entry(
             ("hook", "session-start"), config, self.payload("SessionStart", source="startup")
         )
-        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
+        detail = "session-start exit=%r\nstdout:\n%s\nstderr:\n%s" % (
+            result.returncode,
+            result.stdout.decode("utf-8", "replace"),
+            result.stderr.decode("utf-8", "replace"),
+        )
+        self.assertEqual(result.returncode, 0, detail)
         self.assertTrue(
             self.cached_binary(config).is_file(),
-            "no verified binary in %s: %r" % (self.cache_dir(config), self.listing(config)),
+            "no verified binary in %s: %r\n%s"
+            % (self.cache_dir(config), self.listing(config), detail),
         )
         return result
 
@@ -371,6 +377,109 @@ class ChainTests(unittest.TestCase):
         self.assertIn(SKILL, result.stdout.decode("utf-8"))
 
     # -- cases
+
+    def run_direct(self, label, copy, par_temp):
+        """Run the asset copy directly (no bootstrap, no starter) with --version.
+
+        Returns (ok, report); the report carries the variant's paths, exit code and output.
+        """
+        env = self.environment(self.new_config())
+        env["PAR_GLOBAL_TEMP"] = str(par_temp)
+        try:
+            result = subprocess.run(
+                [str(copy), "--version"],
+                input=b"",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(Path(str(copy)).parent),
+                env=env,
+                timeout=120,
+            )
+            code, out, err = result.returncode, result.stdout, result.stderr
+        except subprocess.TimeoutExpired as expired:
+            code, out, err = "timeout", expired.stdout or b"", expired.stderr or b""
+        text = out.decode("utf-8", "replace")
+        ok = code == 0 and re.match(r"^briefing \S+\r?\n$", text) is not None
+        return ok, (
+            "%s (%s; PAR_GLOBAL_TEMP=%s): exit=%r\nstdout:\n%s\nstderr:\n%s"
+            % (label, copy, par_temp, code, text, err.decode("utf-8", "replace"))
+        )
+
+    def direct_copy(self, base, temp_name):
+        directory = base / "bin"
+        par_temp = base / temp_name
+        directory.mkdir(parents=True)
+        par_temp.mkdir(parents=True)
+        copy = directory / self.asset_name
+        shutil.copyfile(str(ASSET_PATH), str(copy))
+        copy.chmod(0o755)
+        return copy, par_temp
+
+    def test_0_asset_runs_directly_from_an_ascii_directory(self):
+        """Diagnostic control: PAR itself, with ASCII paths only (every platform)."""
+        ascii_root = Path(tempfile.mkdtemp(prefix="briefing-chain-ascii-")).resolve()
+        self.addCleanup(remove_tree, ascii_root)
+        copy, par_temp = self.direct_copy(ascii_root, "par-temp")
+        ok, report = self.run_direct("ascii", copy, par_temp)
+        self.assertTrue(ok, "the asset failed when run directly from ASCII paths:\n" + report)
+
+    def _unicode_direct(self):
+        copy, par_temp = self.direct_copy(self.root / "Direkt-ä-世界", "par-temp-ö")
+        return self.run_direct("unicode", copy, par_temp)
+
+    def test_0_asset_runs_directly_from_a_non_ansi_directory(self):
+        """PAR's loader is ANSI-only, so on Windows a direct run from a non-ANSI long path
+        with a non-ANSI PAR_GLOBAL_TEMP cannot pass on a non-UTF-8 code page. The spec's
+        Unicode requirement covers the bootstrap chain (which hands PAR the 8.3 alias),
+        not a direct PAR run. POSIX has no such limit and must pass.
+        """
+        ok, report = self._unicode_direct()
+        self.assertTrue(ok, "the asset failed when run directly from non-ANSI paths:\n" + report)
+
+    if IS_WINDOWS:
+        test_0_asset_runs_directly_from_a_non_ansi_directory = unittest.expectedFailure(
+            test_0_asset_runs_directly_from_a_non_ansi_directory
+        )
+        test_0_asset_runs_directly_from_a_non_ansi_directory.__doc__ = (
+            "Known failure on Windows: PAR::Packer's loader is ANSI-only; the bootstrap hands "
+            "it the 8.3 alias."
+        )
+
+    @unittest.skipUnless(IS_WINDOWS, "8.3 aliases exist only on Windows")
+    def test_0_asset_runs_directly_through_the_8_3_alias_of_non_ansi_paths(self):
+        """The same non-ANSI copy, reached through the 8.3 alias of its directory and of
+        a non-ANSI PAR_GLOBAL_TEMP, must run. A volume without 8.3 aliases fails loudly
+        here (the alias equals the long path, or the call fails): that is the evidence
+        whether the runner can provide the alias the bootstrap relies on.
+        """
+        import ctypes
+
+        copy, par_temp = self.direct_copy(self.root / "Alias-ä-世界", "par-temp-ö")
+
+        def short(path):
+            buffer = ctypes.create_unicode_buffer(32768)
+            length = ctypes.windll.kernel32.GetShortPathNameW(str(path), buffer, 32768)
+            self.assertTrue(
+                0 < length < 32768,
+                "GetShortPathNameW failed for %s (error %d): no 8.3 alias"
+                % (path, ctypes.GetLastError()),
+            )
+            return buffer.value
+
+        short_directory = short(copy.parent)
+        short_temp = short(par_temp)
+        self.assertNotEqual(
+            os.path.normcase(short_directory), os.path.normcase(str(copy.parent)),
+            "the volume has no 8.3 alias for %s (the call returned the long path)" % copy.parent,
+        )
+        self.assertNotEqual(
+            os.path.normcase(short_temp), os.path.normcase(str(par_temp)),
+            "the volume has no 8.3 alias for %s (the call returned the long path)" % par_temp,
+        )
+        ok, report = self.run_direct(
+            "unicode via 8.3 alias", os.path.join(short_directory, self.asset_name), short_temp
+        )
+        self.assertTrue(ok, "the asset failed through the 8.3 aliases:\n" + report)
 
     def test_1_cold_provision_downloads_verifies_and_caches(self):
         durations = []
