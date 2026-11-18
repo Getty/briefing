@@ -4,6 +4,9 @@
 # workflow runs it from the unpacked dist on every platform (Linux in clean images, macOS and
 # Windows on the runner), and dzil build's local check right after packing.
 #   bash scripts/binary-smoke.sh <binary>       from the dist root
+# Before the checks it prints release_evidence lines (os, architecture, abi, asset_hashes):
+# machine facts only, "unavailable" when not determinable. Run-level provenance is not
+# printed here; it belongs to the GitHub run record.
 # Prints "smoke: all checks passed" and exits 0, or "FAIL: <reason>" on STDERR and exits 1.
 #
 # Checks, each on the binary only:
@@ -29,6 +32,7 @@ set -euo pipefail
 [ -f lib/App/Briefing.pm ] || { echo "FAIL: run from the dist root of briefing" >&2; exit 1; }
 [ -f "$1" ] || { echo "FAIL: no such binary: $1" >&2; exit 1; }
 BIN=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+ASSET_NAME=$(basename "$1")
 
 want=${BRIEFING_EXPECT_VERSION:-$(sed -n "s/^our \$VERSION = '\([^']*\)';.*/\1/p" lib/App/Briefing.pm | head -n 1)}
 [ -n "$want" ] || { echo "FAIL: cannot work out the expected version" >&2; exit 1; }
@@ -45,6 +49,74 @@ if [ ! -x "$BIN" ]; then
   [ -z "${fail_early:-}" ] || { echo "FAIL: cannot make a runnable copy of $BIN" >&2; exit 1; }
   BIN=$work/briefing-bin
 fi
+
+asset_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$BIN" | sed 's/[[:space:]].*$//'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$BIN" | sed 's/^.*= //'
+  else
+    printf 'unavailable\n'
+  fi
+}
+
+# Machine-level evidence, printed to the build log. It states only what this script can
+# determine where it runs (a clean machine: no Perl, no Python); anything else prints
+# "unavailable". Run-level facts (source commit, workflow commit, runner image) are not
+# knowable inside the Linux smoke containers; they come from the GitHub run record.
+# Every probe below tolerates failure: under set -euo pipefail a failed command
+# substitution in an assignment would otherwise end the smoke before any check.
+os_release_field() {
+  sed -n "s/^$1=//p" /etc/os-release 2>/dev/null | head -n 1 | tr -d "\"'\r" || true
+}
+
+emit_release_evidence() {
+  local os architecture abi asset_hash asset_hashes id ver winver build product product_version
+  os=unavailable abi=unavailable
+  architecture=$(uname -m 2>/dev/null) || architecture=unavailable
+  [ -n "$architecture" ] || architecture=unavailable
+  case "$(uname -s 2>/dev/null || true)" in
+    Linux*)
+      id=$(os_release_field ID); ver=$(os_release_field VERSION_ID)
+      [ -n "$id" ] && os="$id${ver:+ $ver}"
+      if command -v getconf >/dev/null 2>&1; then
+        abi=$(getconf GNU_LIBC_VERSION 2>/dev/null) || abi=unavailable
+        [ -n "$abi" ] || abi=unavailable
+      fi
+      ;;
+    Darwin*)
+      if command -v sw_vers >/dev/null 2>&1; then
+        product=$(sw_vers -productName 2>/dev/null) || product=
+        product_version=$(sw_vers -productVersion 2>/dev/null) || product_version=
+        os="$product $product_version"
+      fi
+      abi=darwin-$(uname -r 2>/dev/null || printf unavailable)
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      # Native Windows version via cmd's "ver" ("Microsoft Windows [Version 10.0.20348.1234]"),
+      # not the MSYS runtime version that uname -r reports.
+      winver=$(cmd.exe //c ver 2>/dev/null | tr -d '\r' | sed -n 's/.*\[[^0-9]*\([0-9][0-9.]*\)\].*/\1/p' | head -n 1) || winver=
+      if [ -n "$winver" ]; then
+        os="windows $winver"
+        build=$(printf '%s' "$winver" | cut -d. -f3)
+        [ -n "$build" ] && abi=nt-$build
+      fi
+      ;;
+  esac
+  [ -n "${os// /}" ] || os=unavailable
+  asset_hash=$(asset_sha256 2>/dev/null) || asset_hash=unavailable
+  if [ -z "$asset_hash" ] || [ "$asset_hash" = unavailable ]; then
+    asset_hashes="$ASSET_NAME=unavailable"
+  else
+    asset_hashes="$ASSET_NAME=sha256:$asset_hash"
+  fi
+  printf 'release_evidence os=%s\n' "$os"
+  printf 'release_evidence architecture=%s\n' "$architecture"
+  printf 'release_evidence abi=%s\n' "$abi"
+  printf 'release_evidence asset_hashes=%s\n' "$asset_hashes"
+}
+emit_release_evidence
+
 . "$(dirname "${BASH_SOURCE[0]}")/binary-lib.sh"
 
 out=$(bin --version) || fail "--version failed"
