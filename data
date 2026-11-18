@@ -1,0 +1,22 @@
+---
+class: standard
+created: 2026-11-18T06:03:23Z
+id: 15
+priority: low
+status: backlog
+tags:
+- starter
+- bootstrap
+title: 'Starter: a symlinked config root or ancestor disables the binary'
+updated: 2026-11-18T06:03:36Z
+---
+
+The POSIX starter refuses a symlink in every existing component of the cache path, from / down (bin/briefing path_components_safe, lexical on purpose). Found on the first native macOS run: tests whose temp root sits under /var/folders (/var is a symlink on macOS) never wrote a cache and ran the fallback.
+
+The same holds for real configurations whose config root has a symlinked ancestor or is itself a symlink: CLAUDE_CONFIG_DIR under /tmp on macOS (/tmp -> private/tmp), a dotfile-managed ~/.claude symlink, a home directory reached through a symlink. Such users never get the binary; they run the Python fallback, or get the safe warning when no fallback runtime exists.
+
+Spec section 3 step 2 says "rejects symlinked cache components"; whether components above the starter-owned part (config root and its ancestors) count is not spelled out. Recommendation: keep refusing symlinks in the starter-owned part (briefing/bin/<version>, the binary, the .par directory), accept a symlinked config root or ancestor that resolves to a directory owned by the user and not group- or world-writable, and say so in the docs. This changes what users run, so the decision is Getty's; not needed for 0.001.
+
+The Windows bootstrap walks the cache path from the root the same way for reparse points (briefing-bootstrap.c path_components_safe); the same question applies there.
+
+Precision on the recommendation: system ancestors such as /var or /tmp resolve to root-owned directories, so the ownership check belongs to the resolved config root only (owned by the user, not group- or world-writable), not to each ancestor.
