@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-18T09:01:23Z
+id: 19
+priority: medium
+status: backlog
+tags:
+- starter
+- tests
+- security
+title: 'Starter test: the wget HTTPS-to-HTTP redirect test never exercises a redirect'
+updated: 2026-11-18T09:01:23Z
+---
+
+Found by the k7 native round-3 review. tests/test_starter.py test_wget_rejects_https_to_http_redirect (about lines 589-635, from 2c972d9) never exercises a redirect: its fake wget writes no server response to stderr, so the starter rejects the download for that reason instead of the HTTPS-to-HTTP redirect. The test still passes with the redirect check in bin/briefing (about line 744) removed.
+
+Done when the fake wget emits a realistic server response that redirects from https to http (the shape real wget prints with -S), the test fails against a starter without the redirect check, and passes with it. The curl path's redirect test should be checked the same way.
