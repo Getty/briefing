@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-18T04:57:20Z
+id: 12
+priority: low
+status: backlog
+tags:
+- starter
+- windows
+- pins
+title: 'Pin manifest: starter and bootstrap disagree on NUL bytes'
+updated: 2026-11-18T04:57:20Z
+---
+
+The POSIX starter accepts a pin file with embedded NUL bytes (shell read drops them) while the Windows bootstrap rejects it. The SHA-256 check still protects execution, so this is a parity gap, not a trust gap. Also noted: run_python_fallback in the bootstrap does not guard argc == 0 (not reachable from the launcher). Found in the k7 final fix wave. Done: both reject NUL bytes with a test each; argc guarded.
