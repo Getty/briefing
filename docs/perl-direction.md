@@ -26,12 +26,19 @@ choice; this decision does not claim the distribution is implemented or publishe
 The [packaging probe](../prototypes/perl-packaging/README.md) produced native
 builds on Linux, macOS and Windows x86_64. It also established open work:
 
-1. Windows paths containing umlauts or CJK fail in the unpacked prototype too.
-   The new core needs verified Unicode-capable file operations.
-2. The self-extracting PAR binary adds startup cost and writes a cache. Whether
-   delivery uses that form or a package extracted during installation remains open.
-3. Operation without a separately installed runtime was proved only in isolated
-   Linux. Native macOS/Windows isolation, ARM and the final platform matrix remain open.
+1. Windows Unicode: the core routes Windows file access through wide APIs; the
+   packed binary is expected to handle umlaut/CJK project paths passed through
+   stdin hook payloads and the process working directory, pending native
+   verification of this branch. Command-line arguments reach Perl in the ANSI
+   code page, so `briefing doctor --cwd` with such a path is a known limit (change into
+   the directory instead).
+2. Delivery form decided: the self-extracting PAR binary, unpacked once at
+   `SessionStart` into a versioned `PAR_GLOBAL_TEMP` beside the cached binary;
+   its per-call start cost is tracked separately from correctness.
+3. Platform matrix: five targets (Linux x86_64/arm64, macOS x86_64/arm64,
+   Windows x86_64) built and smoke-tested on GitHub-hosted runners without Perl
+   or Python; support follows the runners each release records. Cold-provision
+   timing and live harness runs remain release checks.
 4. Existing behavior tests should verify the port; real harness contracts remain
    the reference. The probe is not a substitute for those tests.
 5. Check the namespace and PAUSE permissions before publishing to CPAN. Choosing

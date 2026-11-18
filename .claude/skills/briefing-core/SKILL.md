@@ -98,19 +98,25 @@ prove resolution, not actual integration by the harness.
 `bin/briefing` is the plugin's shell starter and what both hook files run
 (`hooks/hooks.json` with `args`, `hooks/codex-hooks.json` as command text because Codex
 ignores `args`). It uses the cached release binary
-`<claudeConfigDir>/briefing/bin/<version>/`, verified against `bin/briefing-binaries.sha256`
-(written by a release, absent or empty means: no download), downloads it only at
-`hook session-start` (never at a spawn, `--version` or `doctor`), and otherwise falls back:
-hooks and plain `doctor` to `hooks/briefing-preload` (Python), other commands and `doctor --tsv`
-to the plugin's Perl when the machine's perl loads it. A spawn must never run unbriefed, so
-Perl is no hook fallback. The binary is the house path of the `[@Author::GETTY]` bundle
-(`dist.ini` binary keys; `.github/workflows/binaries.yml` calls the bundle's `dzil-binary.yml`;
-an empty `tag` = probe, touches no release). `scripts/binary-*.sh` and `scripts/loaded-modules.pl`
-are its pp arguments, verify and clean-machine smoke (also Unicode paths); the assets are
-`briefing-<version>-<platform>` plus `SHA256SUMS`, which is the content of
-`bin/briefing-binaries.sha256`. `dzil build` packs, verifies and smokes locally
-(`DZIL_BINARY_SKIP=1` skips). The binary needs no TLS. Starter changes need a fake-cache test (pinned file, local
-`BRIEFING_BINARY_BASE_URL=file://...`), `sh -n` and `dash -n`.
+`<claudeConfigDir>/briefing/bin/<version>/`, verified before every start against
+`bin/briefing-binaries.sha256` (absent or incomplete means: no download). That pin manifest is
+strict: exactly five entries (linux/macos x86_64+arm64, windows x86_64) for one version, written
+only by `scripts/import-binary-sums.py` from a release's `SHA256SUMS`; the release's own sums are
+never trusted at run time. The starter downloads only at `hook session-start` (never at a spawn,
+`--version` or `doctor`; a failed attempt backs off 15 minutes on POSIX), hashes with native tools (Linux
+`sha256sum`, macOS `openssl dgst -sha256`, never `shasum`), and otherwise falls back: hooks and
+plain `doctor` to `hooks/briefing-preload` (Python), other commands and `doctor --tsv` to the
+plugin's Perl when the machine's perl loads it. A spawn must never run unbriefed, so Perl is no
+hook fallback. The binary is the house path of the `[@Author::GETTY]` bundle (`dist.ini` binary
+keys; `.github/workflows/binaries.yml` calls the bundle's `dzil-binary.yml`, pinned by full SHA
+together with its `bundle_ref`; an empty `tag` = probe, touches no release).
+`scripts/binary-*.sh` and `scripts/loaded-modules.pl` are its pp arguments, verify and clean-machine
+smoke (also Unicode paths); the assets are `briefing-<version>-<platform>` plus `SHA256SUMS`.
+`dzil build` packs, verifies and smokes locally (`DZIL_BINARY_SKIP=1` skips). The binary needs no
+TLS. Starter changes need a fake-cache test (pinned file, local `BRIEFING_BINARY_BASE_URL=file://...`),
+`sh -n` and `dash -n`; the test-only gate `BRIEFING_STARTER_TESTING=1` enables the starter's
+fixtures (OS override, clock) and production ignores them.
+Release, run evidence and pin import: [Binary release](references/binary-release.md).
 
 ## Windows
 
@@ -119,10 +125,18 @@ The Perl source library routes Windows filesystem access through
 verification. Do not infer Windows or macOS support from Linux source or package
 tests, and do not describe the source distribution as standalone binary delivery.
 
+`bin/briefing.exe` is a launcher (`# winlaunch: run bin/briefing-bootstrap.exe`) for the
+briefing-owned `bin/briefing-bootstrap.exe` (C, built reproducibly by
+`briefing-bootstrap/build.py`, tested by `tests/test_briefing_bootstrap.py`, native Windows only;
+its test-only gate is `BRIEFING_BOOTSTRAP_TESTING=1`). The bootstrap does what the starter does:
+pin parsing (the release version comes from the manifest, under the starter's version rule;
+none is compiled in), WinHTTP download, BCrypt check, private cache, then the Python fallback
+by winlaunch's rule (`python3.exe`, else `python.exe`, else `py.exe -3`, along `PATH`, skipping
+directories containing `\WindowsApps`, started with `PYTHONUTF8=1`) and the Perl fallback. The
+committed exe must equal a fresh build byte for byte (`bootstrap-windows` job of `ci.yml`).
 `bin/briefing-doctor` is a shell wrapper, not a symlink: POSIX starts Python
-through it (`bin/briefing.exe` is the same launcher for the starter: it runs the Python hook
-with the starter's arguments, the Windows binary is built and smoke-tested but not yet started); Windows uses the `# winlaunch:` directive through the adjacent `.exe`.
-The `.exe` files under `hooks/` and `bin/` are launchers and still require Python;
+through it; Windows uses the `# winlaunch:` directive through the adjacent `.exe`.
+The other `.exe` files under `hooks/` and `bin/` are generic launchers and still require Python;
 they are not standalone packages with an embedded interpreter.
 For launcher or hook invocation changes, read `winlaunch/README.md`, the header of
 `winlaunch/winlaunch.c`, and `.cicd/python+3.12+test.winlaunch.sh`.

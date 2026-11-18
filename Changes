@@ -1,9 +1,10 @@
 Revision history for briefing
 
 {{$NEXT}}
-  - A reusable `App::Briefing` Perl library and `briefing` CLI provide the hook,
-    doctor, and marketplace notice in a source distribution at the repository
-    root. Python plugin starters remain until binary cutover.
+  - First CPAN release: the reusable `App::Briefing` Perl library and the
+    `briefing` command (`script/briefing`) with the hook, doctor and
+    marketplace notice. CPAN installs only `briefing`, none of the plugin's
+    `bin/` files.
   - Claude Code: skills arrive through `SubagentStart` `additionalContext`
     instead of a rewritten agent prompt, so briefing works with
     `--permission-mode auto`. Auto mode refused any `Agent` call whose input a
@@ -25,18 +26,25 @@ Revision history for briefing
     `ok`, `missing` or `warn`, NAME, TEXT) for tools, and `briefing hook EVENT`
     names the hook event on the command line instead of reading it from the
     payload.
-  - The `briefing` command now lives in `script/` instead of `bin/`.
-  - The plugin ships a starter `bin/briefing` (and `bin/briefing.exe` on
-    Windows) that runs a prebuilt `briefing` binary when one is present and the
-    Python hook otherwise. Binaries are built by a workflow in CI; the CPAN
-    distribution installs only `script/briefing`.
-  - The plugin hooks run through the starter (`bin/briefing hook EVENT`), and
-    Codex reads its own `hooks/codex-hooks.json`; SessionStart may take up to 90
-    seconds to provision the binary. Codex asks to trust the hooks once more.
+  - The plugin's briefing hooks (`PreToolUse` on `Agent`, `SubagentStart` and
+    `SessionStart`) run through its starter `bin/briefing hook EVENT`
+    (`bin/briefing.exe` on Windows, which runs the plugin's own
+    `bin/briefing-bootstrap.exe`); the marketplace notice keeps its own
+    script. Codex reads its own `hooks/codex-hooks.json` and asks to trust the
+    hooks once more. Once binaries are pinned, SessionStart may take up to 90
+    seconds to fetch one.
+  - The GitHub release carries prebuilt `briefing` binaries for Linux
+    x86_64/arm64, macOS x86_64/arm64 and Windows x86_64, plus `SHA256SUMS`.
+    The plugin starts using them only from a later plugin update that pins
+    their checksums (`bin/briefing-binaries.sha256`); until then the hooks run
+    the Python hook as before.
+  - Windows without a pinned binary: the bootstrap starts the first Python it
+    finds (`python3`, `python`, then `py -3`; the Microsoft Store stub is
+    skipped), in UTF-8 mode.
   - Windows: pass a working directory with characters outside the ANSI code
-    page by changing into it, not through `briefing --cwd`; Perl receives
-    command-line arguments in the ANSI code page there. Hook payloads are UTF-8
-    and not affected.
+    page by changing into it, not through `briefing doctor --cwd`; Perl
+    receives command-line arguments in the ANSI code page there. Hook payloads
+    are UTF-8 and not affected.
 
 0.5.3     2026-10-06 05:22:17Z
   - Windows: briefing runs without Git Bash. Each hook script has a small

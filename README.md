@@ -161,11 +161,51 @@ my $hook = $briefing->process_hook($payload);
 the existing one-time marketplace marker, while still returning output for the
 CLI to emit.
 
-The installed plugin launchers still use the Python hooks during this port.
-They are not switched to Perl or to standalone binaries until a separate,
-native verification and cutover. Accordingly, the current plugin instructions
-and Python requirement below remain in force. A source-installed `briefing`
-command itself never invokes Python.
+A source-installed `briefing` command never invokes Python. The plugin runs the
+same core as a prebuilt binary once a release pins it; see
+[Standalone binary](#standalone-binary).
+
+## Standalone binary
+
+The plugin's hooks run its starter, `bin/briefing` (on Windows `bin/briefing.exe`).
+The starter runs `briefing` as a prebuilt binary of the same Perl core, so the
+machine needs neither Python nor Perl. That path is active only in a plugin
+version that carries `bin/briefing-binaries.sha256`, the SHA-256 pins written
+from a published release. Without that file nothing is downloaded and the plugin
+uses the fallback below; that is the state until the first binary release is
+pinned.
+
+- **Platforms:** Linux x86_64 and arm64, macOS x86_64 and arm64, Windows x86_64.
+  Each release is built and smoke-tested on GitHub's hosted runners of the day
+  and records which ones; that recorded set is what is supported. Older
+  operating-system versions may work but are not promised.
+- **Download:** once per version, and only by the `SessionStart` hook (timeout
+  90 seconds), from this repository's GitHub release over HTTPS, at most
+  256 MiB. Agent spawns, `briefing --version` and `briefing doctor` never
+  download. On Linux and macOS a failed attempt makes the next one wait
+  15 minutes; Windows retries at the next `SessionStart`. A fresh
+  installation needs the network once; after that the cached binary works
+  offline.
+- **Trust:** a binary runs only if its SHA-256 matches the pin in the installed
+  plugin, checked after the download and again before every start. The
+  release's own `SHA256SUMS` is never trusted at run time. Repository and
+  release permissions are the trust root; there are no signatures or
+  attestations.
+- **Cache:** `<config>/briefing/bin/<version>/`, where `<config>` is
+  `CLAUDE_CONFIG_DIR` (it must be an absolute path), else `~/.claude`
+  (Windows: `%USERPROFILE%\.claude`). The cache is private to the user (mode
+  0700; on Windows an access list for the current user only) and also holds
+  the binary's unpacked runtime. Old versions are not removed.
+- **Tools:** Linux and macOS use only `sh`, `curl` or `wget`, and `sha256sum`
+  (Linux) or `openssl` (macOS; not `shasum`, which needs Perl). Windows uses
+  the plugin's own `bin/briefing-bootstrap.exe` (WinHTTP and BCrypt; no
+  PowerShell, Python or Perl).
+- **Fallback:** without a verified binary, hooks and plain `doctor` run the
+  Python hook `hooks/briefing-preload` (requirements below); other commands,
+  including `doctor --tsv`, run the plugin's Perl source, but only if the
+  machine's `perl` already loads `App::Briefing`. With neither, a hook answers
+  with a single `systemMessage` warning and exits 0, and other commands fail
+  with that message.
 
 ## Declaring skills
 
@@ -257,11 +297,17 @@ Both paths install the same plugin from the same repo and both keep receiving
 updates. If you installed the old way, a `SessionStart` hook mentions the shared
 marketplace once and then never again.
 
-**Windows**: needs Python 3 on `PATH` — `python3`, `python` or the `py`
-launcher; the Microsoft Store stub does not count. Git Bash is not needed. Each
-hook script has a small `.exe` next to it (`winlaunch/`), which Claude Code
-starts on Windows and which runs the script with that Python; it also makes
-`briefing-doctor` work from PowerShell and cmd.
+**Windows**: Claude Code starts `bin/briefing.exe`, which runs the plugin's own
+`bin/briefing-bootstrap.exe`; it fetches, checks and starts the binary as
+described under [Standalone binary](#standalone-binary). Until a release pins
+the binary, and whenever it is unavailable, that launcher falls back to Python
+for hooks and `doctor`: `python3.exe`, else `python.exe`, else `py.exe -3` on
+`PATH`, in UTF-8 mode; the Microsoft Store stubs in `WindowsApps` do not count.
+Git Bash is not needed. The other hook
+scripts have a small `.exe` next to them (`winlaunch/`), which Claude Code
+starts on Windows and which runs the script with a Python found as `python3`,
+`python` or the `py` launcher; it also makes `briefing-doctor` work from
+PowerShell and cmd.
 
 **Codex**, from the shared marketplace — the only route there:
 
