@@ -1,7 +1,7 @@
 #!/bin/sh
-# Rebuild winlaunch.exe from winlaunch/winlaunch.c and check that every
-# committed hooks/*.exe and bin/*.exe is byte for byte that build. The .exe
-# files are what Claude Code starts on Windows; see winlaunch/winlaunch.c.
+# Rebuild winlaunch.exe from winlaunch/winlaunch.c and check that the committed
+# generic launchers (hooks/*.exe, bin/*.exe except the bootstrap) are byte for byte that build.
+# briefing-bootstrap.exe has its own source and reproducible builder.
 set -eu
 python3 -m venv "$CICD_OUTPUT/venv"
 "$CICD_OUTPUT/venv/bin/pip" install --quiet ziglang==0.13.0.post1
@@ -10,6 +10,7 @@ sha256sum "$CICD_OUTPUT/winlaunch.exe"
 status=0 found=0
 for exe in "$CICD_WORKSPACE"/hooks/*.exe "$CICD_WORKSPACE"/bin/*.exe; do
 	[ -e "$exe" ] || continue
+	[ "${exe##*/}" != briefing-bootstrap.exe ] || continue
 	found=$((found + 1))
 	if cmp -s "$exe" "$CICD_OUTPUT/winlaunch.exe"; then
 		echo "ok   ${exe#"$CICD_WORKSPACE"/}"
@@ -18,5 +19,14 @@ for exe in "$CICD_WORKSPACE"/hooks/*.exe "$CICD_WORKSPACE"/bin/*.exe; do
 		status=1
 	fi
 done
-[ "$found" -gt 0 ] || { echo "FAIL no .exe under hooks/ or bin/"; status=1; }
+[ "$found" -gt 0 ] || { echo "FAIL no generic .exe launcher under hooks/ or bin/"; status=1; }
+
+"$CICD_OUTPUT/venv/bin/python" "$CICD_WORKSPACE/briefing-bootstrap/build.py" "$CICD_OUTPUT/briefing-bootstrap.exe"
+sha256sum "$CICD_WORKSPACE/bin/briefing-bootstrap.exe" "$CICD_OUTPUT/briefing-bootstrap.exe"
+if cmp -s "$CICD_WORKSPACE/bin/briefing-bootstrap.exe" "$CICD_OUTPUT/briefing-bootstrap.exe"; then
+	echo "ok   bin/briefing-bootstrap.exe"
+else
+	echo "FAIL bin/briefing-bootstrap.exe is not its reproducible source build"
+	status=1
+fi
 exit $status
