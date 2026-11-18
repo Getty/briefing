@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-18T04:17:37Z
+id: 11
+priority: low
+status: backlog
+tags:
+- windows
+- bootstrap
+- build
+title: 'Bootstrap build: warnings as errors'
+updated: 2026-11-18T04:17:37Z
+---
+
+briefing-bootstrap/build.py compiles the bootstrap without a warnings-as-errors flag, so a new compiler warning would pass the reproducible build unnoticed. Found as a deferred minor in the k7 Task 6 review. Done: build.py passes the flag (keeping the committed exe byte-identical or rebuilding it), with the build contract test updated.
