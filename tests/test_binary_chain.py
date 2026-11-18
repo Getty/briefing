@@ -341,6 +341,19 @@ class ChainTests(unittest.TestCase):
             "no verified binary in %s: %r\n%s"
             % (self.cache_dir(config), self.listing(config), detail),
         )
+        # A silent fallback must not pass as a provision: the cache entry has to be the
+        # pinned asset, and the entry must not have reported that no binary ran.
+        self.assertEqual(
+            sha256_of(self.cached_binary(config)), self.asset_sha,
+            "the provisioned cache entry is not the pinned asset\n" + detail,
+        )
+        for line in result.stdout.decode("utf-8", "replace").splitlines():
+            try:
+                message = json.loads(line).get("systemMessage", "")
+            except (ValueError, AttributeError):
+                continue
+            self.assertNotIn(
+                "no binary", message, "the cold provision fell back\n" + detail)
         return result
 
     def assert_safe_warning(self, result):

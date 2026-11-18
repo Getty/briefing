@@ -1245,16 +1245,24 @@ static void destroy_private_security(struct private_security *security)
     ZeroMemory(security, sizeof(*security));
 }
 
+/* A refused object leaves a Windows error saying why: the query's own error, a reparse
+ * point, or the wrong object type. */
 static int handle_information(
     HANDLE handle, DWORD expected_directory, DWORD *attributes
 )
 {
     BY_HANDLE_FILE_INFORMATION information;
 
-    if (!GetFileInformationByHandle(handle, &information) ||
-        (information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
-        (!!(information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) !=
-         !!expected_directory)) {
+    if (!GetFileInformationByHandle(handle, &information)) {
+        return 0;
+    }
+    if (information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+        SetLastError(ERROR_REPARSE_POINT_ENCOUNTERED);
+        return 0;
+    }
+    if (!!(information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) !=
+        !!expected_directory) {
+        SetLastError(expected_directory ? ERROR_DIRECTORY : ERROR_DIRECTORY_NOT_SUPPORTED);
         return 0;
     }
     *attributes = information.dwFileAttributes;
@@ -1286,6 +1294,8 @@ static int handle_owner_is_current_user(
     return matches;
 }
 
+/* On failure the last error is SetSecurityInfo's status, or ERROR_INVALID_OWNER when the
+ * owner did not become the current user. */
 static int protect_handle(
     HANDLE handle,
     const struct private_security *security,
@@ -1303,8 +1313,16 @@ static int protect_handle(
         acl,
         NULL
     );
-    return status == ERROR_SUCCESS &&
-           handle_owner_is_current_user(handle, security);
+
+    if (status != ERROR_SUCCESS) {
+        SetLastError(status);
+        return 0;
+    }
+    if (!handle_owner_is_current_user(handle, security)) {
+        SetLastError(ERROR_INVALID_OWNER);
+        return 0;
+    }
+    return 1;
 }
 
 static HANDLE open_object(
@@ -1330,7 +1348,10 @@ static HANDLE open_object(
         return INVALID_HANDLE_VALUE;
     }
     if (!handle_information(handle, expected_directory, &attributes)) {
+        DWORD error = GetLastError();
+
         CloseHandle(handle);
+        SetLastError(error);
         return INVALID_HANDLE_VALUE;
     }
     return handle;
@@ -1369,13 +1390,18 @@ static int protect_object(
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         expected_directory
     );
+    DWORD error;
     int ok;
 
     if (handle == INVALID_HANDLE_VALUE) {
         return 0;
     }
     ok = protect_handle(handle, security, inheritable);
+    error = GetLastError();
     CloseHandle(handle);
+    if (!ok) {
+        SetLastError(error);
+    }
     return ok;
 }
 
@@ -1829,6 +1855,7 @@ cleanup:
     return ok;
 }
 
+/* On failure the last error is the failing call's: lookup, creation, open or protection. */
 static int ensure_private_directory(
     const wchar_t *path,
     const struct private_security *security,
@@ -1910,15 +1937,16 @@ static HANDLE open_regular_file(const wchar_t *path, DWORD access, DWORD sharing
         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
         NULL
     );
-    BY_HANDLE_FILE_INFORMATION information;
+    DWORD attributes;
 
     if (handle == INVALID_HANDLE_VALUE) {
         return INVALID_HANDLE_VALUE;
     }
-    if (!GetFileInformationByHandle(handle, &information) ||
-        (information.dwFileAttributes &
-         (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
+    if (!handle_information(handle, 0, &attributes)) {
+        DWORD error = GetLastError();
+
         CloseHandle(handle);
+        SetLastError(error);
         return INVALID_HANDLE_VALUE;
     }
     return handle;
@@ -2206,17 +2234,35 @@ static int hashes_equal(
     return difference == 0;
 }
 
+/* The step at which open_verified_binary refused a cached binary. Only a checksum
+ * mismatch or an oversize file proves the cache entry wrong; the other steps say nothing
+ * about its bytes. */
+enum verify_step {
+    VERIFY_OPEN = 1,
+    VERIFY_PROTECT,
+    VERIFY_READ,
+    VERIFY_OVERSIZE,
+    VERIFY_CHECKSUM
+};
+
+struct verify_failure {
+    enum verify_step step;
+    DWORD error;
+};
+
 static HANDLE open_verified_binary(
     const wchar_t *path,
     const struct pin_manifest *pins,
     const struct private_security *security,
-    DWORD *failure_error
+    struct verify_failure *failure
 )
 {
     HANDLE file;
+    LARGE_INTEGER size;
     unsigned char actual[HASH_BYTES];
 
-    *failure_error = ERROR_SUCCESS;
+    failure->step = VERIFY_OPEN;
+    failure->error = ERROR_SUCCESS;
     file = open_regular_file(
         path,
         GENERIC_READ | FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC |
@@ -2224,20 +2270,40 @@ static HANDLE open_verified_binary(
         FILE_SHARE_READ
     );
     if (file == INVALID_HANDLE_VALUE) {
-        *failure_error = GetLastError();
+        failure->error = GetLastError();
         return INVALID_HANDLE_VALUE;
     }
     if (!protect_handle(file, security, 0)) {
-        *failure_error = ERROR_ACCESS_DENIED;
+        failure->step = VERIFY_PROTECT;
+        failure->error = GetLastError();
         CloseHandle(file);
         return INVALID_HANDLE_VALUE;
     }
-    if (!hash_handle(file, DOWNLOAD_MAX_BYTES, actual) ||
-        !hashes_equal(actual, pins->windows_hash)) {
-        *failure_error = ERROR_CRC;
+    if (!GetFileSizeEx(file, &size)) {
+        failure->step = VERIFY_READ;
+        failure->error = GetLastError();
         CloseHandle(file);
         return INVALID_HANDLE_VALUE;
     }
+    if (size.QuadPart < 0 || (ULONGLONG)size.QuadPart > DOWNLOAD_MAX_BYTES) {
+        failure->step = VERIFY_OVERSIZE;
+        CloseHandle(file);
+        return INVALID_HANDLE_VALUE;
+    }
+    SetLastError(ERROR_SUCCESS);
+    if (!hash_handle(file, DOWNLOAD_MAX_BYTES, actual)) {
+        failure->step = VERIFY_READ;
+        failure->error = GetLastError();
+        CloseHandle(file);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (!hashes_equal(actual, pins->windows_hash)) {
+        failure->step = VERIFY_CHECKSUM;
+        failure->error = ERROR_CRC;
+        CloseHandle(file);
+        return INVALID_HANDLE_VALUE;
+    }
+    failure->error = ERROR_SUCCESS;
     return file;
 }
 
@@ -2250,34 +2316,67 @@ static int verified_open_retryable(DWORD error)
            error == ERROR_DELETE_PENDING;
 }
 
+/* Only an open that may succeed later is retried: a busy, pending or not yet renamed file. */
+static int verify_retryable(const struct verify_failure *failure)
+{
+    return failure->step == VERIFY_OPEN && verified_open_retryable(failure->error);
+}
+
+static int verify_disproves_cache(const struct verify_failure *failure)
+{
+    return failure->step == VERIFY_CHECKSUM || failure->step == VERIFY_OVERSIZE;
+}
+
+/* why_binary naming the step at which binary was refused, with its Windows error. */
+static const char *verify_failure_reason(
+    const char *binary, const struct verify_failure *failure
+)
+{
+    unsigned long error = (unsigned long)failure->error;
+
+    switch (failure->step) {
+    case VERIFY_OPEN:
+        return verify_retryable(failure)
+            ? reason_text("%s remained busy or incomplete, Windows error %lu", binary, error)
+            : reason_text("cannot open %s, Windows error %lu", binary, error);
+    case VERIFY_PROTECT:
+        return reason_text(
+            "cannot protect %s for the current user, Windows error %lu", binary, error
+        );
+    case VERIFY_READ:
+        return reason_text("cannot read and hash %s, Windows error %lu", binary, error);
+    case VERIFY_OVERSIZE:
+        return reason_text("%s exceeds the binary size limit", binary);
+    case VERIFY_CHECKSUM:
+    default:
+        return reason_text("%s failed its pinned checksum", binary);
+    }
+}
+
 static HANDLE open_verified_binary_with_retry(
     const wchar_t *path,
     const struct pin_manifest *pins,
     const struct private_security *security,
     int testing,
-    DWORD *failure_error
+    struct verify_failure *failure
 )
 {
-    HANDLE verified = open_verified_binary(
-        path, pins, security, failure_error
-    );
+    HANDLE verified = open_verified_binary(path, pins, security, failure);
     unsigned int attempt;
 
-    if (verified != INVALID_HANDLE_VALUE ||
-        !verified_open_retryable(*failure_error)) {
+    if (verified != INVALID_HANDLE_VALUE || !verify_retryable(failure)) {
         return verified;
     }
-    if ((*failure_error == ERROR_SHARING_VIOLATION ||
-         *failure_error == ERROR_LOCK_VIOLATION) &&
+    if ((failure->error == ERROR_SHARING_VIOLATION ||
+         failure->error == ERROR_LOCK_VIOLATION) &&
         !test_sync_point(testing, L"concurrent-loser-sharing-violation")) {
         return INVALID_HANDLE_VALUE;
     }
 
     for (attempt = 0; attempt < VERIFIED_OPEN_RETRY_ATTEMPTS; attempt++) {
         Sleep(VERIFIED_OPEN_RETRY_DELAY_MS);
-        verified = open_verified_binary(path, pins, security, failure_error);
-        if (verified != INVALID_HANDLE_VALUE ||
-            !verified_open_retryable(*failure_error)) {
+        verified = open_verified_binary(path, pins, security, failure);
+        if (verified != INVALID_HANDLE_VALUE || !verify_retryable(failure)) {
             return verified;
         }
     }
@@ -2899,13 +2998,39 @@ static wchar_t *cache_binary_path(
     return path;
 }
 
+/* *error is the Windows error of a failed creation or protection, or ERROR_SUCCESS when
+ * the directory exists but a path component is a reparse point or otherwise unsafe. */
 static int ensure_par_directory(
     const wchar_t *par_directory,
-    const struct private_security *security
+    const struct private_security *security,
+    DWORD *error
 )
 {
-    return ensure_private_directory(par_directory, security, 1) &&
-           path_components_safe(par_directory, 0);
+    *error = ERROR_SUCCESS;
+    if (!ensure_private_directory(par_directory, security, 1)) {
+        *error = GetLastError();
+        if (*error == ERROR_SUCCESS) {
+            *error = ERROR_GEN_FAILURE;
+        }
+        return 0;
+    }
+    return path_components_safe(par_directory, 0);
+}
+
+/* why_binary for a PAR directory beside binary that ensure_par_directory refused. */
+static const char *par_directory_reason(const char *binary, DWORD error)
+{
+    if (error == ERROR_SUCCESS) {
+        return reason_text(
+            "the PAR cache directory beside %s has a reparse point or an unsafe path component",
+            binary
+        );
+    }
+    return reason_text(
+        "the PAR cache directory beside %s is unusable, Windows error %lu",
+        binary,
+        (unsigned long)error
+    );
 }
 
 static HANDLE provision_binary(
@@ -2936,7 +3061,8 @@ static HANDLE provision_binary(
     DWORD warm_status = 1;
     DWORD warm_error = ERROR_SUCCESS;
     DWORD rename_error = ERROR_SUCCESS;
-    DWORD verify_error = ERROR_SUCCESS;
+    DWORD par_error = ERROR_SUCCESS;
+    struct verify_failure verify_failure = {VERIFY_OPEN, ERROR_SUCCESS};
     int installed = 0;
     int binding_valid = 1;
 
@@ -3011,8 +3137,8 @@ static HANDLE provision_binary(
         *why = "the downloaded Windows binary could not be reopened and rechecked";
         goto cleanup;
     }
-    if (!ensure_par_directory(bound_par_directory, security)) {
-        *why = "cannot create the private PAR directory beside the binary";
+    if (!ensure_par_directory(bound_par_directory, security, &par_error)) {
+        *why = par_directory_reason("the downloaded binary", par_error);
         goto cleanup;
     }
     if (!test_sync_point(testing, L"warm-before-create") ||
@@ -3145,25 +3271,23 @@ static HANDLE provision_binary(
         goto cleanup;
     }
     verified = open_verified_binary_with_retry(
-        bound_destination, pins, security, testing, &verify_error
+        bound_destination, pins, security, testing, &verify_failure
     );
     if (verified == INVALID_HANDLE_VALUE) {
         if (installed) {
-            *why = reason_text(
-                "the installed Windows binary could not be reopened and verified, Windows error %lu",
-                (unsigned long)verify_error
-            );
+            *why = verify_failure_reason("the installed Windows binary", &verify_failure);
         } else {
             *why = reason_text(
                 "the verified binary could not be renamed into the cache, Windows error %lu, "
                 "and no concurrent install could be verified, Windows error %lu",
                 (unsigned long)rename_error,
-                (unsigned long)verify_error
+                (unsigned long)verify_failure.error
             );
         }
     }
+    /* Only bytes that disprove the pin are removed; a refused open or ACL leaves them. */
     if (verified == INVALID_HANDLE_VALUE && installed &&
-        !verified_open_retryable(verify_error) && cache_lock_valid(cache_lock)) {
+        verify_disproves_cache(&verify_failure) && cache_lock_valid(cache_lock)) {
         (void)safe_delete_regular(bound_destination);
     }
 
@@ -3217,9 +3341,11 @@ static HANDLE find_binary(
 {
     wchar_t *manifest_path = NULL;
     wchar_t *version_directory = NULL;
+    wchar_t *bound_directory = NULL;
     struct pin_manifest pins;
     HANDLE verified = INVALID_HANDLE_VALUE;
-    DWORD verify_error = ERROR_SUCCESS;
+    struct verify_failure verify_failure = {VERIFY_OPEN, ERROR_SUCCESS};
+    DWORD par_error = ERROR_SUCCESS;
     int missing = 0;
 
     *binary_path = NULL;
@@ -3243,7 +3369,17 @@ static HANDLE find_binary(
         *why_binary = "cannot create and bind the complete private binary cache path";
         goto cleanup;
     }
-    *binary_path = cache_binary_path(version_directory, &pins);
+    /* This process is not long-path aware, so a plain name beneath the configured
+     * directory fails once it reaches MAX_PATH: the binary's file name alone is about 100
+     * characters and CreateDirectoryW stops at 248. The cache entry and its PAR directory
+     * are named from the extended final path of the locked version directory instead, as
+     * provision_binary names them. */
+    bound_directory = final_path_by_handle(cache_version_directory_handle(cache_lock));
+    if (bound_directory == NULL || !path_components_safe(bound_directory, 0)) {
+        *why_binary = "the binary cache directory has no safe final path";
+        goto cleanup;
+    }
+    *binary_path = cache_binary_path(bound_directory, &pins);
     if (*binary_path == NULL) {
         *why_binary = "cannot construct the pinned binary cache path";
         goto cleanup;
@@ -3254,32 +3390,52 @@ static HANDLE find_binary(
         goto cleanup;
     }
 
-    if (GetFileAttributesW(*binary_path) != INVALID_FILE_ATTRIBUTES) {
-        if (ensure_par_directory(*par_directory, security)) {
-            verified = open_verified_binary_with_retry(
-                *binary_path, &pins, security, testing, &verify_error
+    if (GetFileAttributesW(*binary_path) == INVALID_FILE_ATTRIBUTES) {
+        DWORD error = GetLastError();
+
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+            *why_binary = reason_text(
+                "cannot look up the cached Windows binary, Windows error %lu",
+                (unsigned long)error
             );
+            goto cleanup;
         }
+        if (!can_provision) {
+            *why_binary =
+                "the pinned binary is not cached; only SessionStart downloads it";
+            goto cleanup;
+        }
+    } else {
+        if (!ensure_par_directory(*par_directory, security, &par_error)) {
+            *why_binary = par_directory_reason("the cached Windows binary", par_error);
+            goto cleanup;
+        }
+        verified = open_verified_binary_with_retry(
+            *binary_path, &pins, security, testing, &verify_failure
+        );
         if (verified != INVALID_HANDLE_VALUE) {
             *why_binary = NULL;
             goto cleanup;
         }
-        if (verified_open_retryable(verify_error)) {
-            *why_binary = "the cached Windows binary remained busy or incomplete";
-            if (verify_error != ERROR_FILE_NOT_FOUND &&
-                verify_error != ERROR_PATH_NOT_FOUND) {
-                goto cleanup;
-            }
-        } else {
-            *why_binary = "the cached Windows binary failed its pinned checksum";
+        *why_binary = verify_failure_reason("the cached Windows binary", &verify_failure);
+        if (verify_disproves_cache(&verify_failure)) {
+            /* Wrong bytes: only SessionStart removes them, to download the pinned ones. */
             if (!can_provision || !safe_delete_regular(*binary_path)) {
                 goto cleanup;
             }
+        } else if (verify_failure.step == VERIFY_OPEN &&
+                   (verify_failure.error == ERROR_FILE_NOT_FOUND ||
+                    verify_failure.error == ERROR_PATH_NOT_FOUND)) {
+            /* Gone since the lookup: absent again, and only SessionStart downloads. */
+            if (!can_provision) {
+                *why_binary =
+                    "the pinned binary is not cached; only SessionStart downloads it";
+                goto cleanup;
+            }
+        } else {
+            /* Busy, unopenable, unprotectable or unreadable: the bytes stay untouched. */
+            goto cleanup;
         }
-    } else if (!can_provision) {
-        *why_binary =
-            "the pinned binary is not cached; only SessionStart downloads it";
-        goto cleanup;
     }
 
     verified = provision_binary(
@@ -3297,6 +3453,7 @@ static HANDLE find_binary(
     }
 
 cleanup:
+    free(bound_directory);
     free(version_directory);
     free(manifest_path);
     if (verified == INVALID_HANDLE_VALUE) {
@@ -3686,6 +3843,7 @@ static int run_verified_child(
     wchar_t *par_directory = NULL;
     wchar_t *loader_program = NULL;
     wchar_t *loader_par_directory = NULL;
+    DWORD par_error = ERROR_SUCCESS;
     int ran = 0;
 
     if (!restore_token_owner(security)) {
@@ -3702,9 +3860,12 @@ static int run_verified_child(
         goto cleanup;
     }
     par_directory = append_suffix(program, L".par");
-    if (par_directory == NULL ||
-        !ensure_par_directory(par_directory, security)) {
-        *why = "cannot create the private PAR directory beside the binary";
+    if (par_directory == NULL) {
+        *why = "cannot construct the PAR cache path";
+        goto cleanup;
+    }
+    if (!ensure_par_directory(par_directory, security, &par_error)) {
+        *why = par_directory_reason("the verified Windows binary", par_error);
         goto cleanup;
     }
     if (!test_sync_point(testing, L"cache-hit-before-create")) {
@@ -3780,6 +3941,7 @@ static int run_test_child(
     const wchar_t **arguments = NULL;
     HANDLE lock = INVALID_HANDLE_VALUE;
     DWORD status = 1;
+    DWORD par_error;
     int result = 1;
     int index;
 
@@ -3804,7 +3966,8 @@ static int run_test_child(
         goto cleanup;
     }
     par_directory = append_suffix(canonical_child, L".par");
-    if (par_directory == NULL || !ensure_par_directory(par_directory, security)) {
+    if (par_directory == NULL ||
+        !ensure_par_directory(par_directory, security, &par_error)) {
         write_error("briefing-bootstrap: cannot create a private PAR cache path\n");
         goto cleanup;
     }

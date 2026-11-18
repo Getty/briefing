@@ -27,6 +27,7 @@ import tempfile
 import threading
 import time
 import unittest
+import warnings
 from pathlib import Path
 
 
@@ -270,6 +271,122 @@ class BootstrapBuildTests(unittest.TestCase):
                     self.assertEqual(timestamp, 0, "COFF TimeDateStamp must be zero")
                     self.assertFalse(output.with_suffix(".pdb").exists())
                     self.assertFalse(output.with_suffix(".lib").exists())
+
+
+def is_reparse_point(path):
+    """True for a symlink or a Windows junction, without following it."""
+    try:
+        info = os.lstat(str(path))
+    except OSError:
+        return False
+    attributes = getattr(info, "st_file_attributes", 0)
+    return os.path.islink(str(path)) or bool(attributes & 0x400)
+
+
+def current_user_sid():
+    """The current user's SID as text, from `whoami /user` (immune to non-ASCII names)."""
+    result = subprocess.run(
+        ["whoami", "/user", "/fo", "csv", "/nh"], stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, timeout=30)
+    fields = result.stdout.decode("ascii", "replace").strip().strip('"').split('","')
+    sid = fields[-1].strip('"') if result.returncode == 0 and fields else ""
+    return sid if sid.startswith("S-") else None
+
+
+def restore_access(path):
+    """Grant the current user full control on `path`; return the failed steps ([] = ok).
+
+    The provisioner applies a protected, non-inheritable current-user DACL to the private
+    cache and propagates it to existing children. A junction made beforehand then ends up
+    with an empty DACL and cannot be removed; a reset would not help (nothing is
+    inheritable), so the grant is always applied. `/L` acts on the link itself, never on
+    its target. If the grant is refused, ownership is taken and the grant repeated.
+    Windows only; elsewhere nothing to do.
+    """
+    if os.name != "nt":
+        return []
+    steps = []
+    try:
+        sid = current_user_sid()
+        if sid is None:
+            return ["whoami /user: no SID"]
+        grant = ["icacls", str(path), "/grant:r", "*%s:(F)" % sid, "/L"]
+        if subprocess.run(grant, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          timeout=30).returncode == 0:
+            return []
+        steps.append("icacls /grant:r")
+        if subprocess.run(["takeown", "/F", str(path)], stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, timeout=30).returncode != 0:
+            steps.append("takeown /F")
+        if subprocess.run(grant, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          timeout=30).returncode != 0:
+            steps.append("icacls /grant:r (after takeown)")
+    except (OSError, subprocess.SubprocessError) as error:
+        steps.append("access restore raised %r" % (error,))
+    return steps
+
+
+def remove_reparse_point(path):
+    """Remove a junction or symlink itself, never its target. Absent is fine.
+
+    Raises OSError naming the failed access steps if the link cannot be removed.
+    """
+    if not is_reparse_point(path):
+        return
+    steps = restore_access(path)
+    try:
+        os.rmdir(str(path))  # a junction is removed as a directory, not unlinked
+    except OSError:
+        try:
+            os.unlink(str(path))
+        except OSError as error:
+            raise OSError(
+                "cannot remove reparse point %s (failed steps: %s): %s"
+                % (path, ", ".join(steps) or "none before removal", error))
+
+
+def scrub_tree(root):
+    """Remove a test tree that may hold junctions or protected objects.
+
+    Junctions go first, as links; read-only attributes are cleared; only then does
+    rmtree run. A leftover is a warning, because teardown cannot tell a test's own
+    failure from an object the OS refuses to release; each test asserts its own result.
+    """
+    def walk(directory):
+        try:
+            entries = list(os.scandir(str(directory)))
+        except OSError:
+            steps = restore_access(directory)
+            if steps:
+                warnings.warn("cannot restore access to %s: %s" % (directory, ", ".join(steps)))
+            try:
+                entries = list(os.scandir(str(directory)))
+            except OSError as error:
+                warnings.warn("cannot list %s: %s" % (directory, error))
+                return
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                if is_reparse_point(path):
+                    remove_reparse_point(path)
+                elif entry.is_dir(follow_symlinks=False):
+                    walk(path)
+                else:
+                    os.chmod(entry.path, 0o700)
+            except OSError as error:
+                warnings.warn("scrub step failed for %s: %s" % (path, error))
+
+    root = Path(root)
+    if is_reparse_point(root):
+        try:
+            remove_reparse_point(root)
+        except OSError as error:
+            warnings.warn(str(error))
+    else:
+        walk(root)
+    shutil.rmtree(str(root), ignore_errors=True)
+    if root.exists():
+        warnings.warn("test tree left behind: %s" % root)
 
 
 def sha256(data):
@@ -845,11 +962,8 @@ class BootstrapSourceTests(unittest.TestCase):
 class BootstrapProcessTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temporary = tempfile.TemporaryDirectory(
-            prefix="briefing bootstrap native-"
-        )
-        cls.addClassCleanup(cls.temporary.cleanup)
-        cls.root = Path(cls.temporary.name)
+        cls.root = Path(tempfile.mkdtemp(prefix="briefing bootstrap native-"))
+        cls.addClassCleanup(scrub_tree, cls.root)
         cls.plugin = cls.root / "Plugin-ä-世界"
         (cls.plugin / "bin").mkdir(parents=True)
         for name in ("hooks", "lib", "script"):
@@ -1476,6 +1590,8 @@ class BootstrapProcessTests(unittest.TestCase):
                 link = self.config.joinpath(*parts) if parts else self.config
                 link.parent.mkdir(parents=True, exist_ok=True)
                 self.create_junction(link, target)
+                # Registered per case, before the run: the junction goes first, as a link.
+                self.addCleanup(remove_reparse_point, link)
 
                 result = self.run_bootstrap(
                     ("hook", "session-start"),
