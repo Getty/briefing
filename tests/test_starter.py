@@ -97,7 +97,8 @@ class StarterTest(unittest.TestCase):
         self.asset = self.asset_for(OS_NAME, ARCH)
         self.cache_dir = self.config / "briefing" / "bin" / VERSION
         self.execution_marker = self.tmp / "fixture-executed"
-        self.shell = shutil.which("sh")
+        # BRIEFING_TEST_SHELL points the suite at another POSIX shell (e.g. bash, as macOS /bin/sh is).
+        self.shell = os.environ.get("BRIEFING_TEST_SHELL") or shutil.which("sh")
         self.serve(FAKE_BINARY)
 
     @staticmethod
@@ -218,31 +219,33 @@ class StarterTest(unittest.TestCase):
                shlex.quote(str(fixture)), shlex.quote(str(downloaded))))
         curl.chmod(0o755)
 
-        for tool in ("chmod", "env", "ln", "rm"):
+        shimmed = ("chmod", "env", "ln", "rm")
+        if trigger_stage == "post-download":
+            shimmed += ("wc",)
+        for tool in shimmed:
             source = shutil.which(tool)
             self.assertIsNotNone(source, "missing required test tool %s" % tool)
             trigger = ""
-            if tool == "chmod" and trigger_stage == "post-download":
+            if tool == "wc" and trigger_stage == "post-download":
+                # `wc -c <"$tmp"` follows the post-download `chmod 600` and its revalidation
+                # and precedes the warm-up. It is always looked up through PATH; `chmod` is
+                # not a usable trigger, because the starter's earlier `command -p chmod` makes
+                # bash (macOS /bin/sh) hash /bin/chmod and skip the shim from then on.
                 trigger = (
-                    "if [ \"${1-}\" = 600 ] && [ -e %s ] && [ ! -e %s ]; then\n"
-                    "  case ${2-} in\n"
-                    "    %s/.*.tmp)\n"
-                    "      printf 'trigger: swapping %%s\\n' \"${2-}\" >> %s\n"
-                    "      %s %s %s || { echo 'trigger: mv failed' >> %s; exit 91; }\n"
-                    "      %s -s %s %s || { echo 'trigger: ln failed' >> %s; exit 92; }\n"
-                    "      : > %s\n"
-                    "      ;;\n"
-                    "    *) printf 'trigger: no match %%s\\n' \"${2-}\" >> %s ;;\n"
-                    "  esac\n"
+                    "if [ \"${1-}\" = -c ] && [ -e %s ] && [ ! -e %s ]; then\n"
+                    "  printf 'trigger: swapping at wc\\n' >> %s\n"
+                    "  %s %s %s || { echo 'trigger: mv failed' >> %s; exit 91; }\n"
+                    "  %s -s %s %s || { echo 'trigger: ln failed' >> %s; exit 92; }\n"
+                    "  : > %s\n"
                     "fi\n"
                     % (shlex.quote(str(downloaded)), shlex.quote(str(triggered)),
-                       shlex.quote(str(self.cache_dir.parent)), shlex.quote(str(calls)),
+                       shlex.quote(str(calls)),
                        shlex.quote(real_mv),
                        shlex.quote(str(self.cache_dir)), shlex.quote(str(displaced)),
                        shlex.quote(str(calls)),
                        shlex.quote(real_ln), shlex.quote(str(foreign)),
                        shlex.quote(str(self.cache_dir)), shlex.quote(str(calls)),
-                       shlex.quote(str(triggered)), shlex.quote(str(calls))))
+                       shlex.quote(str(triggered))))
             elif tool == "ln" and trigger_stage == "ln":
                 bin_file = self.cache_dir / ("%s-%s" % (self.asset, sha256(data)))
                 trigger = (
