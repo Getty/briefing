@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-18T04:17:33Z
+id: 10
+priority: low
+status: backlog
+tags:
+- starter
+- download
+title: 'Starter: wget download has no total timeout'
+updated: 2026-11-18T04:17:33Z
+---
+
+bin/briefing downloads with curl --max-time 60 but wget only gets -T 10 (a per-phase timeout), so a slow server could keep a wget-only machine past the 75 s cold-provision budget. The SessionStart hook timeout (90 s) still bounds it and curl is tried first. Found in the k7 final review (M4). Done: a total bound for the wget path, with a starter test.
