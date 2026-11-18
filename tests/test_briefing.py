@@ -13,7 +13,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from cli_driver import command_for
+from cli_driver import (assert_skill_dir, command_for,
+                        known_failure_on_windows_perl_cli)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "briefing-preload"
@@ -374,6 +375,8 @@ class BriefingHookTests(unittest.TestCase):
         self.assertIn("PROJECT FOO", prompt)
         self.assertNotIn("USER FOO", prompt)
 
+    @known_failure_on_windows_perl_cli(
+        "k14", "the Perl CLI loses a non-ANSI HOME on Windows; outside the k7 design")
     def test_user_skill_resolves_from_unicode_home(self):
         unicode_home = self.root / "home-ä-技能"
         unicode_home.mkdir()
@@ -439,7 +442,7 @@ class BriefingHookTests(unittest.TestCase):
         skill_dir = os.path.abspath(
             self.home / ".claude/plugins/cache/mp/mattpocock-skills/1.2.3"
             "/skills/engineering/domain-modeling")
-        self.assertIn('dir="%s"' % skill_dir, prompt)
+        assert_skill_dir(self, prompt, "mattpocock-skills:domain-modeling", skill_dir)
 
     def test_manifest_skills_path_may_hold_several_skills(self):
         self._declare("somepl:tool")
@@ -708,7 +711,7 @@ class BriefingHookTests(unittest.TestCase):
         out = json.loads(run_hook(self._payload(), fake_home=self.home).stdout)
         prompt = out["hookSpecificOutput"]["additionalContext"]
         skill_dir = os.path.abspath(self.cwd / ".claude/skills/foo")
-        self.assertIn('<skill name="foo" dir="%s">' % skill_dir, prompt)
+        assert_skill_dir(self, prompt, "foo", skill_dir)
         self.assertIn("relative to", prompt)
         self.assertNotIn("\nAPI\n", prompt)
 

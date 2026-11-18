@@ -17,7 +17,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from cli_driver import command_for
+from cli_driver import assert_skill_dir, command_for
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "briefing-preload"
@@ -332,7 +332,7 @@ class CodexHookTests(unittest.TestCase):
         ctx = out["hookSpecificOutput"]["additionalContext"]
 
         skill_dir = os.path.abspath(self.cwd / ".agents/skills/one")
-        self.assertIn('<skill name="one" dir="%s">' % skill_dir, ctx)
+        assert_skill_dir(self, ctx, "one", skill_dir)
         self.assertIn("relative to", ctx)
         self.assertNotIn("\nAPI\n", ctx)
 

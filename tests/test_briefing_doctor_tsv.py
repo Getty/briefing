@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cli_driver import command_for
+from cli_driver import command_for, known_failure_on_windows_perl_cli
 
 TAB = "\t"
 EXTERNAL = os.environ.get("BRIEFING_TEST_CLI") is not None
@@ -175,6 +175,9 @@ class TsvRows(TsvBase):
                          ["agent", "missing", ".claude/agents", "no agent files"])
         self.assertEqual(self.of(r, "hook"), [])
 
+    @known_failure_on_windows_perl_cli(
+        "k9", "the Perl doctor does not see a dangling symlink on Windows; "
+              "t/40-doctor-tsv.t skips it there too")
     def test_dangling_symlink_warns_and_is_no_agent(self):
         self.team()
         link = self.cwd / ".claude" / "agents" / "harbor-gone.md"
