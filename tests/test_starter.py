@@ -174,6 +174,8 @@ class StarterTest(unittest.TestCase):
         operations = self.tmp / ("swap-window-" + trigger_stage + "-operations.log")
         triggered = self.tmp / ("swap-window-" + trigger_stage + "-triggered")
         downloaded = self.tmp / ("swap-window-" + trigger_stage + "-downloaded")
+        calls = self.tmp / ("swap-window-" + trigger_stage + "-calls.log")
+        self.swap_calls = calls
         bindir = self.tmp / ("swap-window-" + trigger_stage + "-tools")
         bindir.mkdir()
         realpath = bindir / "realpath"
@@ -201,6 +203,7 @@ class StarterTest(unittest.TestCase):
             "    *) shift ;;\n"
             "  esac\n"
             "done\n"
+            "printf 'curl output=%%s\\n' \"$output\" >> %s\n"
             "resolved=$(%s -- \"$output\") || exit 95\n"
             "foreign=%s\n"
             "case $resolved in\n"
@@ -210,7 +213,7 @@ class StarterTest(unittest.TestCase):
             "esac\n"
             "%s %s \"$output\"\n"
             ": > %s\n"
-            % (shlex.quote(str(realpath)), shlex.quote(str(foreign)),
+            % (shlex.quote(str(calls)), shlex.quote(str(realpath)), shlex.quote(str(foreign)),
                shlex.quote(str(operations)), shlex.quote(real_cp),
                shlex.quote(str(fixture)), shlex.quote(str(downloaded))))
         curl.chmod(0o755)
@@ -224,17 +227,22 @@ class StarterTest(unittest.TestCase):
                     "if [ \"${1-}\" = 600 ] && [ -e %s ] && [ ! -e %s ]; then\n"
                     "  case ${2-} in\n"
                     "    %s/.*.tmp)\n"
-                    "      %s %s %s || exit 91\n"
-                    "      %s -s %s %s || exit 92\n"
+                    "      printf 'trigger: swapping %%s\\n' \"${2-}\" >> %s\n"
+                    "      %s %s %s || { echo 'trigger: mv failed' >> %s; exit 91; }\n"
+                    "      %s -s %s %s || { echo 'trigger: ln failed' >> %s; exit 92; }\n"
                     "      : > %s\n"
                     "      ;;\n"
+                    "    *) printf 'trigger: no match %%s\\n' \"${2-}\" >> %s ;;\n"
                     "  esac\n"
                     "fi\n"
                     % (shlex.quote(str(downloaded)), shlex.quote(str(triggered)),
-                       shlex.quote(str(self.cache_dir.parent)), shlex.quote(real_mv),
+                       shlex.quote(str(self.cache_dir.parent)), shlex.quote(str(calls)),
+                       shlex.quote(real_mv),
                        shlex.quote(str(self.cache_dir)), shlex.quote(str(displaced)),
+                       shlex.quote(str(calls)),
                        shlex.quote(real_ln), shlex.quote(str(foreign)),
-                       shlex.quote(str(self.cache_dir)), shlex.quote(str(triggered))))
+                       shlex.quote(str(self.cache_dir)), shlex.quote(str(calls)),
+                       shlex.quote(str(triggered)), shlex.quote(str(calls))))
             elif tool == "ln" and trigger_stage == "ln":
                 bin_file = self.cache_dir / ("%s-%s" % (self.asset, sha256(data)))
                 trigger = (
@@ -275,7 +283,9 @@ class StarterTest(unittest.TestCase):
                        shlex.quote(str(self.cache_dir)), shlex.quote(str(triggered))))
             wrapper = bindir / tool
             wrapper.write_text(
-                "#!/bin/sh\n" + trigger +
+                "#!/bin/sh\n"
+                "printf '%s %%s\\n' \"$*\" >> %s\n" % (tool, shlex.quote(str(calls))) +
+                trigger +
                 "foreign=%s\n"
                 "for argument do\n"
                 "  candidate=$argument\n"
@@ -838,6 +848,16 @@ class StarterTest(unittest.TestCase):
                              "the starter left its temporary file after the swap")
         self.assert_python_briefed(result)
 
+    def swap_diagnostics(self, result):
+        """Starter outcome and shim call log, for a swap trigger that did not run."""
+        calls = self.swap_calls.read_text() if self.swap_calls.exists() else "(no shim call)"
+        try:
+            message = json.loads(result.stdout).get("systemMessage")
+        except (ValueError, AttributeError):
+            message = None
+        return ("exit=%s\nsystemMessage=%s\nstdout=%s\nstderr=%s\nshim calls:\n%s"
+                % (result.returncode, message, result.stdout, result.stderr, calls))
+
     def test_swap_after_post_download_revalidation_before_warmup_is_rejected(self):
         data = self.marker_binary()
         digest = self.pin(data)
@@ -855,7 +875,8 @@ class StarterTest(unittest.TestCase):
             "hook", "session-start", url="https://fixtures.invalid", now=NOW,
             extra_env={"PATH": path})
 
-        self.assertTrue(triggered.is_file(), "the pre-warm-up cache swap did not run")
+        self.assertTrue(triggered.is_file(),
+                        "the pre-warm-up cache swap did not run\n" + self.swap_diagnostics(result))
         foreign_operations = operations.read_text().splitlines() if operations.exists() else []
         self.assertEqual(
             foreign_operations, [],
@@ -893,7 +914,8 @@ class StarterTest(unittest.TestCase):
             "hook", "session-start", url="https://fixtures.invalid", now=NOW,
             extra_env={"PATH": path})
 
-        self.assertTrue(triggered.is_file(), "the pre-install cache swap did not run")
+        self.assertTrue(triggered.is_file(),
+                        "the pre-install cache swap did not run\n" + self.swap_diagnostics(result))
         foreign_operations = operations.read_text().splitlines() if operations.exists() else []
         self.assertEqual(
             foreign_operations, [],
@@ -968,7 +990,8 @@ class StarterTest(unittest.TestCase):
             "hook", "session-start", url="https://fixtures.invalid", now=NOW,
             extra_env=extra_env)
 
-        self.assertTrue(triggered.is_file(), "the post-install cache swap did not run")
+        self.assertTrue(triggered.is_file(),
+                        "the post-install cache swap did not run\n" + self.swap_diagnostics(result))
         self.assertFalse(foreign_marker.exists(),
                          "unverified foreign bytes ran after successful installation")
         self.assertEqual(list(foreign.iterdir()), [foreign_binary])

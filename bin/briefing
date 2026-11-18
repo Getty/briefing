@@ -34,6 +34,11 @@
 # No `set -e`/`set -u`: each step falls through to the next, and a hook must exit 0 on every
 # path - an unset variable under -u exits 2, which a hook may read as "block".
 #
+# Bracket expressions spell their characters out ([0123456789], never [0-9]): a range follows
+# the locale's collation in some shells - macOS /bin/sh (bash 3.2) lets [A-Za-z0-9] match a
+# non-ASCII letter such as U+00E4 in a UTF-8 locale - while an explicit list matches the same
+# ASCII set in every locale.
+#
 # winlaunch: run bin/briefing-bootstrap.exe
 
 # Files created by the starter are private even when its caller has a permissive umask.
@@ -112,10 +117,10 @@ platform_asset() {
   platform_arch=$2
   platform_version=$3
   case $platform_version in
-    [A-Za-z0-9]*) ;;
+    [ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789]*) ;;
     *) return 1 ;;
   esac
-  case $platform_version in *[!A-Za-z0-9._+-]*) return 1 ;; esac
+  case $platform_version in *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._+-]*) return 1 ;; esac
   case $platform_os:$platform_arch in
     linux:x86_64 | linux:arm64 | macos:x86_64 | macos:arm64)
       printf 'briefing-%s-%s-%s\n' "$platform_version" "$platform_os" "$platform_arch"
@@ -155,7 +160,7 @@ read_pins() {
     pin_sum=${pin_line%%  *}
     pin_name=${pin_line#*  }
     [ "$pin_line" = "$pin_sum  $pin_name" ] || return 1
-    case $pin_sum in '' | *[!0-9a-f]*) return 1 ;; esac
+    case $pin_sum in '' | *[!0123456789abcdef]*) return 1 ;; esac
     [ "${#pin_sum}" -eq 64 ] || return 1
 
     pin_suffix=-$pin_os-$pin_arch
@@ -208,7 +213,7 @@ hash_file() {
       ;;
     *) return 1 ;;
   esac
-  case $hash_value in '' | *[!0-9a-f]*) return 1 ;; esac
+  case $hash_value in '' | *[!0123456789abcdef]*) return 1 ;; esac
   [ "${#hash_value}" -eq 64 ] || return 1
   printf '%s' "$hash_value"
 }
@@ -313,8 +318,8 @@ new_temp() {
 is_canonical_epoch() {
   case $1 in
     0) return 0 ;;
-    [1-9]*)
-      case $1 in *[!0-9]*) return 1 ;; esac
+    [123456789]*)
+      case $1 in *[!0123456789]*) return 1 ;; esac
       if [ "${#1}" -le 10 ]; then return 0; fi
       return 1
       ;;
@@ -624,7 +629,7 @@ fetch_binary_bound() {
     return 1
   fi
   download_size=$1
-  case $download_size in '' | *[!0-9]*)
+  case $download_size in '' | *[!0123456789]*)
     drop_download "cannot determine the size of the downloaded $asset"
     return 1
     ;;
