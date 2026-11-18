@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-18T05:14:02Z
+id: 13
+priority: low
+status: backlog
+tags:
+- starter
+- diagnostics
+title: 'Starter: tampered cache warns ''not cached'' instead of the checksum mismatch'
+updated: 2026-11-18T16:47:37Z
+---
+
+bin/briefing (around the find_binary fallback, line ~500 in the k7 branch) overwrites the checksum-mismatch reason with "the pinned binary is not cached" for every command except SessionStart, so a tampered cache is reported misleadingly. Behavior is safe (the binary does not run); only the warning text is wrong. Found in the k7 fix-wave re-review. Done: the mismatch reason survives, with a starter test.
+
+2026-11-18 16:47 Seen again on reuben with k7-standalone-delivery 7044aef (agent-construction-kit binary test): the tampered cache is refused and falls back, the warning still says 'not cached'. skilletor's starter has the same bug: skilletor k252.
