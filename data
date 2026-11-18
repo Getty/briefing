@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-18T03:52:55Z
+id: 9
+priority: low
+status: backlog
+tags:
+- windows
+- doctor
+title: 'Windows: doctor does not report dangling agent symlinks'
+updated: 2026-11-18T03:52:55Z
+---
+
+App::Briefing::Filesystem::is_dangling_symlink returns 0 on MSWin32 by design, so on Windows briefing doctor lists no row at all for a dangling .md symlink in .claude/agents (POSIX: agent warn 'dangling symlink (Claude Code cannot load it)'). Found by CI 43967354475 (main, Installed distribution / windows / Perl 5.40): t/40-doctor-tsv.t tests 94-95 fail because Strawberry Perl 5.40 can create the symlink on the runner. The k7 branch skips that test case on Windows with this card as the reason. Done when: the Windows doctor detects a dangling agent symlink through wide APIs (also for non-ANSI paths), and the t/40 case runs on Windows again. Low impact: Git for Windows checks symlinks out as plain files by default.
