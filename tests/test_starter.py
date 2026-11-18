@@ -66,7 +66,9 @@ def sha256(data):
 @unittest.skipIf(SKIP_REASON is not None, SKIP_REASON or "")
 class StarterTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="briefing-starter-"))
+        # Resolved: on macOS the temp root lies under the /var symlink, which the
+        # starter refuses in any component of the cache path on purpose.
+        self.tmp = Path(tempfile.mkdtemp(prefix="briefing-starter-")).resolve()
         self.addCleanup(shutil.rmtree, str(self.tmp), True)
         self.plugin = self.tmp / "plugin"
         self.plugin.mkdir()
@@ -166,7 +168,7 @@ class StarterTest(unittest.TestCase):
         self.addCleanup(stop_server)
         return "http://127.0.0.1:%d/%s" % (server.server_port, VERSION)
 
-    def _swap_window_tools(self, data, foreign, displaced, trigger_stage):
+    def _swap_window_tools(self, data, foreign, displaced, trigger_stage, macos_hash=None):
         fixture = self.tmp / ("swap-window-" + trigger_stage + "-fixture")
         fixture.write_bytes(data)
         operations = self.tmp / ("swap-window-" + trigger_stage + "-operations.log")
@@ -294,11 +296,28 @@ class StarterTest(unittest.TestCase):
                    shlex.quote(str(operations)), shlex.quote(source)))
             wrapper.chmod(0o755)
 
-        hash_tool = "sha256sum" if OS_NAME == "linux" else "openssl"
+        if macos_hash is None:
+            macos_hash = OS_NAME != "linux"
+        hash_tool = "openssl" if macos_hash else "sha256sum"
         hash_source = shutil.which(hash_tool)
+        if hash_tool == "openssl" and OS_NAME == "linux":
+            # Simulated macOS on Linux: a stand-in for `openssl dgst -sha256 FILE`, as in
+            # test_macos_hash_path_uses_native_openssl_not_shasum (no openssl needed).
+            digest_script = (
+                "import hashlib,sys; "
+                "print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())")
+            hash_source = bindir / "openssl-real"
+            hash_source.write_text(
+                "#!/bin/sh\n"
+                "for argument do file=$argument; done\n"
+                "digest=$(%s -c %s \"$file\") || exit 1\n"
+                "printf 'SHA2-256(%%s)= %%s\\n' \"$file\" \"$digest\"\n"
+                % (shlex.quote(sys.executable), shlex.quote(digest_script)))
+            hash_source.chmod(0o755)
+            hash_source = str(hash_source)
         self.assertIsNotNone(hash_source, "missing required test tool %s" % hash_tool)
         hash_wrapper = bindir / hash_tool
-        if OS_NAME == "linux":
+        if not macos_hash:
             hash_wrapper.write_text(
                 "#!/bin/sh\n"
                 "foreign=%s\n"
@@ -889,6 +908,39 @@ class StarterTest(unittest.TestCase):
         self.assert_python_briefed(result)
 
     def test_post_install_swap_cannot_execute_unverified_public_binary(self):
+        self._post_install_swap(simulate_macos=False)
+
+    @unittest.skipUnless(OS_NAME == "linux", "the native macOS leg runs the unsimulated test")
+    def test_post_install_swap_on_path_exec_platform_is_detected_and_falls_back(self):
+        self._post_install_swap(simulate_macos=True)
+
+    def _swap_outcome(self, result, simulate_macos):
+        """Pin the platform's outcome of a cache swap after the verification.
+
+        Linux executes the verified descriptor: the verified bytes run (TRUSTED) however the
+        public path changes. macOS has no descriptor exec (no fexecve), so it executes by
+        path: the starter re-hashes and re-checks the path components right before execve,
+        detects a swap made before that check, refuses to run the swapped bytes and falls
+        back. Known limit, not testable from sh: a swap between that final check and
+        execve (and an in-place replacement inside the private 0700 cache after the
+        re-hash) is not detected; only the cache owner can make either.
+        """
+        on_macos = simulate_macos or OS_NAME == "macos"
+        self.assertEqual(result.returncode, 0, result.stderr)
+        if on_macos:
+            self.assertNotIn("TRUSTED", result.stdout,
+                             "macOS ran a binary after the cache path was swapped")
+            self.assert_python_briefed(result)
+        else:
+            self.assertIn("TRUSTED", result.stdout,
+                          "the verified descriptor was not executed: " + result.stdout)
+
+    def _post_install_swap(self, simulate_macos):
+        extra_env = {}
+        if simulate_macos:
+            self.asset = self.asset_for("macos", ARCH)
+            extra_env = {"BRIEFING_STARTER_TESTING": "1",
+                         "BRIEFING_STARTER_TEST_OS": "Darwin"}
         trusted = (
             "#!/bin/sh\n"
             "if [ \"${1-}\" = --version ]; then exit 0; fi\n"
@@ -909,11 +961,12 @@ class StarterTest(unittest.TestCase):
         foreign_binary.chmod(0o700)
         displaced = self.tmp / "displaced-cache-after-install"
         path, _operations, triggered = self._swap_window_tools(
-            trusted, foreign, displaced, "rm-retry")
+            trusted, foreign, displaced, "rm-retry", macos_hash=simulate_macos or None)
+        extra_env["PATH"] = path
 
         result = self.run_starter(
             "hook", "session-start", url="https://fixtures.invalid", now=NOW,
-            extra_env={"PATH": path})
+            extra_env=extra_env)
 
         self.assertTrue(triggered.is_file(), "the post-install cache swap did not run")
         self.assertFalse(foreign_marker.exists(),
@@ -922,11 +975,21 @@ class StarterTest(unittest.TestCase):
         self.assertEqual(foreign_binary.read_bytes(), foreign_bytes,
                          "the post-install path changed the foreign binary")
         self.assertEqual(stat.S_IMODE(foreign_binary.stat().st_mode), 0o700)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        if "TRUSTED" not in result.stdout:
-            self.assert_python_briefed(result)
+        self._swap_outcome(result, simulate_macos)
 
     def test_cache_hit_swap_after_hash_cannot_execute_unverified_public_binary(self):
+        self._cache_hit_swap(simulate_macos=False)
+
+    @unittest.skipUnless(OS_NAME == "linux", "the native macOS leg runs the unsimulated test")
+    def test_cache_hit_swap_on_path_exec_platform_is_detected_and_falls_back(self):
+        self._cache_hit_swap(simulate_macos=True)
+
+    def _cache_hit_swap(self, simulate_macos):
+        extra_env = {}
+        if simulate_macos:
+            self.asset = self.asset_for("macos", ARCH)
+            extra_env = {"BRIEFING_STARTER_TESTING": "1",
+                         "BRIEFING_STARTER_TEST_OS": "Darwin"}
         trusted = (
             "#!/bin/sh\n"
             "printf 'TRUSTED %%s|%%s\\n' \"$PAR_GLOBAL_TEMP\" \"$*\"\n"
@@ -947,10 +1010,11 @@ class StarterTest(unittest.TestCase):
         foreign_binary.chmod(0o700)
         displaced = self.tmp / "displaced-cache-after-hit"
         path, _operations, triggered = self._swap_window_tools(
-            trusted, foreign, displaced, "rm-retry")
+            trusted, foreign, displaced, "rm-retry", macos_hash=simulate_macos or None)
+        extra_env["PATH"] = path
 
         result = self.run_starter(
-            "hook", "subagent-start", extra_env={"PATH": path})
+            "hook", "subagent-start", extra_env=extra_env)
 
         self.assertTrue(triggered.is_file(), "the cache-hit post-hash swap did not run")
         self.assertFalse(foreign_marker.exists(),
@@ -959,9 +1023,7 @@ class StarterTest(unittest.TestCase):
         self.assertEqual(foreign_binary.read_bytes(), foreign_bytes,
                          "the cache-hit path changed the foreign binary")
         self.assertEqual(stat.S_IMODE(foreign_binary.stat().st_mode), 0o700)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        if "TRUSTED" not in result.stdout:
-            self.assert_python_briefed(result)
+        self._swap_outcome(result, simulate_macos)
 
     @unittest.skipUnless(HAVE_CURL, "skipped: curl is not available for the file:// download")
     def test_cache_directories_and_binary_are_mode_0700(self):

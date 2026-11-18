@@ -391,11 +391,25 @@ close_binary_run() {
   run_file=
 }
 
-# Open the candidate first, then hash and later exec only that open file description. Replacing
-# its public cache path after this point cannot change which bytes receive execution authority.
+# No symlink in the cache directory chain, the binary, its PAR directory or the retry stamp.
+cache_entry_safe() {
+  cache_components_safe "$cache_dir" && [ ! -L "$bin_file" ] && [ ! -L "$par_dir" ] &&
+    [ ! -L "$retry_file" ]
+}
+
+# Linux: open the candidate first, then hash and later exec only that open file description.
+# Replacing its public cache path after this point cannot change which bytes receive execution
+# authority. macOS refuses to execve a /dev/fd node, so there the run file is the absolute cache
+# path inside the private 0700 cache: it is hashed here and again by start_binary_run, right
+# before the exec. The platform decides, never a failing exec - a failed exec ends the starter.
 prepare_binary_run() {
   [ "$#" -eq 1 ] || return 1
   close_binary_run
+  if [ "$os" = macos ]; then
+    verify_binary_file "$1" || return 1
+    run_file=$bin_file
+    return 0
+  fi
   if ! exec 9<"$1"; then return 1; fi
   if [ -r /dev/fd/9 ]; then
     run_file=/dev/fd/9
@@ -410,6 +424,24 @@ prepare_binary_run() {
     return 1
   fi
   return 0
+}
+
+# Step 1 ends here: exec the prepared run file. On macOS the cache path is rehashed and the
+# symlink and component checks are repeated immediately before the exec; a change falls through
+# to the fallbacks.
+start_binary_run() {
+  if [ "$os" = macos ]; then
+    if ! verify_binary_file "$run_file"; then
+      close_binary_run
+      return 1
+    fi
+    if ! cache_entry_safe || [ ! -f "$run_file" ]; then
+      close_binary_run
+      why_binary="the binary cache changed before the cached $asset could be started"
+      return 1
+    fi
+  fi
+  exec env "$par_temp_var=$par_dir" "$run_file" "$@"
 }
 
 # Steps 1 and 2. Sets bin_file and par_dir and returns 0 when the binary is there to run;
@@ -473,8 +505,7 @@ find_binary() {
   bin_file=$cache_dir/$asset-$sum
   par_dir=$bin_file.par
   retry_file=$cache_dir/.$asset.failed-at
-  if ! cache_components_safe "$cache_dir" || [ -L "$bin_file" ] ||
-    [ -L "$par_dir" ] || [ -L "$retry_file" ]; then
+  if ! cache_entry_safe; then
     why_binary="the binary cache contains a symlink and was refused"
     return 1
   fi
@@ -761,7 +792,7 @@ find_perl() {
 }
 
 if find_binary && [ -n "$run_file" ]; then
-  exec env "$par_temp_var=$par_dir" "$run_file" "$@"
+  start_binary_run "$@"
 fi
 
 why_python=
