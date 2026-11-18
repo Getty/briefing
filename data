@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-16T22:03:49Z
+id: 8
+priority: low
+status: backlog
+tags:
+- windows
+- packaging
+title: 'Windows: read the wide command line so doctor --cwd accepts non-ANSI paths'
+updated: 2026-11-18T06:04:14Z
+---
+
+Perl @ARGV is ANSI on Windows; 'briefing doctor --tsv --cwd <path with CJK>' fails ('is not a directory'). Known limit, documented in README (cd into the directory instead). Possible fix: CommandLineToArgvW via Win32::API, unverified. Hooks (stdin JSON) are unaffected. Evidence: binaries probe run 43964789676.
+
+k7 acceptance conflict (2026-11-18): the approved design's acceptance says "Windows uses the native bootstrap and passes Unicode argv, cwd, stdin, and filesystem tests", and its native Windows chain list includes "doctor --tsv --cwd with a non-ANSI path passed through argv". The bootstrap passes argv to the child through CreateProcessW correctly; the limit is this card (Perl inside the PAR binary reads @ARGV in the ANSI code page). The native chain test (tests/test_binary_chain.py test_5_doctor_tsv_with_cwd_through_argv) is an expectedFailure naming k8; in its first native run (binaries probe 44244389169) provisioning failed before it, so the argv limit itself is not yet observed natively through the chain.
+Recommendation: narrow the 0.001 acceptance to "Unicode cwd, stdin and filesystem; non-ANSI argv is a documented limit (README: change into the directory instead of doctor --cwd)", and keep this card for the wide command line after 0.001. Hook payloads arrive over stdin and are unaffected. Decision is Getty's; if argv must pass for 0.001, this card has to land before dzil release 0.001, because the binaries are built from the release tarball.
