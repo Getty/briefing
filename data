@@ -1,0 +1,18 @@
+---
+class: standard
+created: 2026-11-18T06:46:39Z
+id: 16
+priority: low
+status: backlog
+tags:
+- starter
+- bootstrap
+- performance
+title: 'Starter/bootstrap: warm-up extracts PAR under the temporary name'
+updated: 2026-11-18T06:47:01Z
+---
+
+Found in the k7 native fix round (worker diagnosis, PAR::Packer 1.064 source): both the POSIX starter and the Windows bootstrap run the warm-up on the downloaded temporary file before installing it (only bytes that ran enter the cache). PAR keys its extracted interpreter by the executable's file name, so the warm-up extracts under the temporary name and the first real cache hit extracts again under the installed name, leaving a stray copy in the versioned .par directory. Effect: the first spawn after provisioning pays a second cold PAR start (runner: ~0.35-0.6 s Linux, seconds on slow hosts) and the .par directory grows by one interpreter copy per provisioning.
+Recommendation: warm up under the final name (install, then warm up, then remove the entry again if the warm-up fails) or under a stable name PAR will reuse. This changes the install order the starter and bootstrap now guarantee ("only warmed bytes enter the cache"), so the decision is Getty's; related to k6 (latency).
+
+Precision: the re-extraction under the installed name is inferred for the Windows bootstrap from the PAR::Packer loader source. The POSIX starter also warms the temporary file, but whether PAR re-extracts there as well is unverified; check the .par directory after one provisioning plus one cache hit on Linux and macOS before acting.
