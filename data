@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-18T06:46:43Z
+id: 17
+priority: low
+status: backlog
+tags:
+- bootstrap
+- windows
+title: 'Bootstrap: bound total download time, warm-up wait and crash dialogs'
+updated: 2026-11-18T07:13:15Z
+---
+
+Found in the k7 native fix round (worker review of briefing-bootstrap.c, not implemented there): (1) the download has no total deadline: WinHTTP's 60 s receive timeout resets on every chunk; (2) the warm-up waits for the PAR child with WaitForSingleObject(..., INFINITE); (3) no SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX), so a crashing child could raise a Windows error dialog; (4) the verified-open retry intends about 5 s but takes about 7.8 s with the default timer resolution (250 x Sleep(20)). The SessionStart hook timeout bounds all of them from outside, as with k10 for the POSIX wget path.
+Recommendation: add a total download deadline and a bounded warm-up wait inside the SessionStart budget, suppress error dialogs for children, and make the retry deadline-based. Robustness only, not needed for 0.001; decision Getty's.
+
+Review M2 (k7 native round): a non-retryable rename failure in the bootstrap install (briefing-bootstrap.c ~3114, 3147) still waits ~8 s (250 x 20 ms) for a concurrent install before falling back; the deadline-based retry recommended above covers it.
