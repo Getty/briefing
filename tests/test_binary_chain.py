@@ -381,6 +381,16 @@ class ChainTests(unittest.TestCase):
         )
         self.addCleanup(lambda: path.unlink() if path.exists() else None)
 
+    def home_listing(self, home):
+        """What the binary left under a test home (names only), for assertion messages."""
+        claude = home / ".claude"
+        try:
+            names = sorted(entry.name for entry in claude.iterdir()) if claude.is_dir() else None
+        except OSError as error:
+            names = "unreadable: %r" % (error,)
+        return "home exists=%s, home/.claude exists=%s, home/.claude names=%r" % (
+            home.exists(), claude.exists(), names)
+
     def tsv_rows(self, result):
         text = result.stdout.decode("utf-8")
         return [line.split("\t") for line in text.splitlines() if line]
@@ -571,6 +581,40 @@ class ChainTests(unittest.TestCase):
         self.assertEqual(unknown.stdout, b"")
         self.assertNotEqual(unknown.stderr.strip(), b"", "the error text did not reach stderr")
 
+    def test_6a_user_skill_resolves_from_a_non_ansi_home(self):
+        # k20: splits a failing 6b. The home below is outside the ANSI code page (世界), so a
+        # briefing that reads HOME wrongly cannot find the user-level skill (the read is
+        # broken); if this passes while 6b fails, reading HOME works and writing under it fails.
+        config = self.new_config()
+        self.provision(config)
+        home = self.root / ("Heim-Skill-ä-世界-" + self._testMethodName)
+        name = "home-skill"
+        text = "CHAIN-USER-HOME-MARKER-" + name
+        skill = home / ".claude" / "skills" / name / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_bytes((text + "\n").encode("utf-8"))
+        # An extra agent in the shared project; the skill exists nowhere else, so the other
+        # tests (doctor scans the project) must not see the agent.
+        agent = self.project / ".claude" / "agents" / "homeskill.md"
+        agent.write_bytes(
+            ("---\nname: homeskill\ndescription: d\nbriefing:\n  skills:\n    - %s\n---\nbody\n" % name)
+            .encode("utf-8")
+        )
+        self.addCleanup(lambda: agent.unlink() if agent.exists() else None)
+        windows_home = {"USERPROFILE": str(home)} if IS_WINDOWS else {}
+        result = self.run_entry(
+            ("hook", "subagent-start"), config,
+            self.payload("SubagentStart", agent_type="homeskill", agent_id="a2"),
+            extra_env=dict(HOME=str(home), **windows_home),
+        )
+        detail = "exit=%r\nstdout:\n%s\nstderr:\n%s" % (
+            result.returncode, result.stdout.decode("utf-8", "replace"),
+            result.stderr.decode("utf-8", "replace"))
+        self.assertEqual(result.returncode, 0, detail)
+        specific = json.loads(result.stdout.decode("utf-8"))["hookSpecificOutput"]
+        self.assertEqual(specific["hookEventName"], "SubagentStart", detail)
+        self.assertIn(text, specific["additionalContext"], detail)
+
     def test_6b_marketplace_notice_shows_once_then_silence_without_perl_or_python(self):
         # k20: the SessionStart notice is `hook marketplace-notice` of the provisioned binary.
         # PATH holds neither Perl nor Python (setUpClass), so only the binary can print it.
@@ -613,7 +657,7 @@ class ChainTests(unittest.TestCase):
             "briefing is now also in the shared Getty marketplace"), detail)
         self.assertIn("/plugin install briefing@getty", output["systemMessage"])
         self.assertNotIn("no binary", output["systemMessage"], detail)
-        self.assertTrue(state.is_file(), "the notice recorded nothing")
+        self.assertTrue(state.is_file(), "the notice recorded nothing; " + self.home_listing(home))
 
         assert_silent(notice("briefing"))
         self.assertEqual(len(self.server.paths), requests, "the notice used the network")
