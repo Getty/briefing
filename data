@@ -1,0 +1,80 @@
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":1,"ts":"2026-09-23T02:58:53Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":1,"ts":"2026-09-23T03:30:04Z"}
+{"action":"move","agent":"briefing","detail":"review","task_id":1,"ts":"2026-09-23T03:30:23Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":2,"ts":"2026-09-23T03:30:28Z"}
+{"action":"move","agent":"briefing","detail":"done","task_id":1,"ts":"2026-09-23T18:01:12Z"}
+{"action":"move","agent":"briefing","detail":"done","task_id":2,"ts":"2026-09-23T18:01:12Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"todo","task_id":3,"ts":"2026-09-27T02:42:56Z"}
+{"action":"pick","agent":"briefing","detail":"in-progress","task_id":3,"ts":"2026-09-27T03:24:59Z"}
+{"action":"move","agent":"briefing","detail":"review","task_id":3,"ts":"2026-09-27T23:07:36Z"}
+{"action":"move","agent":"briefing","detail":"done","task_id":3,"ts":"2026-09-27T23:08:50Z"}
+{"action":"create","agent":"briefing","detail":"in-progress","task_id":4,"ts":"2026-09-27T23:26:41Z"}
+{"action":"move","agent":"briefing","detail":"review","task_id":4,"ts":"2026-09-27T23:36:12Z"}
+{"action":"move","agent":"briefing","detail":"done","task_id":4,"ts":"2026-09-27T23:36:15Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"todo","task_id":5,"ts":"2026-11-16T01:08:21Z"}
+{"action":"edit","agent":"briefing","detail":"review","task_id":5,"ts":"2026-11-16T20:43:29Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":6,"ts":"2026-11-16T20:43:33Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":7,"ts":"2026-11-16T20:44:13Z"}
+{"action":"edit","agent":"briefing","detail":"review","task_id":5,"ts":"2026-11-16T20:44:17Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":7,"ts":"2026-11-16T22:01:48Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":8,"ts":"2026-11-16T22:03:49Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":7,"ts":"2026-11-17T17:48:43Z"}
+{"action":"move","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-17T17:48:51Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-17T17:49:00Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-17T17:52:36Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-17T18:03:05Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-17T18:28:16Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-17T18:51:12Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-17T22:36:36Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-17T23:29:52Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T02:29:28Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T02:35:20Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T03:33:21Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":9,"ts":"2026-11-18T03:52:55Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":10,"ts":"2026-11-18T04:17:33Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":11,"ts":"2026-11-18T04:17:37Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":12,"ts":"2026-11-18T04:57:20Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":13,"ts":"2026-11-18T05:14:02Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T05:26:06Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T05:26:52Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T05:27:01Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":14,"ts":"2026-11-18T05:58:35Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":14,"ts":"2026-11-18T05:58:46Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":6,"ts":"2026-11-18T06:03:03Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":15,"ts":"2026-11-18T06:03:23Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":15,"ts":"2026-11-18T06:03:36Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":8,"ts":"2026-11-18T06:04:14Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":16,"ts":"2026-11-18T06:46:39Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":17,"ts":"2026-11-18T06:46:43Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":16,"ts":"2026-11-18T06:47:01Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":18,"ts":"2026-11-18T07:12:54Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":18,"ts":"2026-11-18T07:13:10Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":17,"ts":"2026-11-18T07:13:15Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":6,"ts":"2026-11-18T07:13:20Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T07:27:23Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":6,"ts":"2026-11-18T07:47:21Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T07:47:33Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":18,"ts":"2026-11-18T08:10:26Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T08:36:45Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":6,"ts":"2026-11-18T08:50:13Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":6,"ts":"2026-11-18T08:50:47Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T09:01:01Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":19,"ts":"2026-11-18T09:01:23Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-18T09:14:52Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"todo","task_id":20,"ts":"2026-11-18T16:47:33Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":13,"ts":"2026-11-18T16:47:37Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":14,"ts":"2026-11-19T03:12:21Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":18,"ts":"2026-11-19T03:12:30Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"todo","task_id":20,"ts":"2026-11-19T03:12:35Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":6,"ts":"2026-11-19T03:12:49Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":6,"ts":"2026-11-19T03:14:49Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":14,"ts":"2026-11-19T03:14:54Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":18,"ts":"2026-11-19T03:14:58Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":14,"ts":"2026-11-19T03:15:02Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":18,"ts":"2026-11-19T03:15:06Z"}
+{"action":"move","agent":"briefing","detail":"in-progress","task_id":6,"ts":"2026-11-19T03:15:11Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":6,"ts":"2026-11-19T03:17:30Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":6,"ts":"2026-11-19T03:23:42Z"}
+{"action":"handoff","agent":"briefing","detail":"review","task_id":6,"ts":"2026-11-19T03:28:02Z"}
+{"action":"edit","agent":"briefing","detail":"review","task_id":6,"ts":"2026-11-19T03:47:49Z"}
+{"action":"edit","agent":"briefing","detail":"review","task_id":6,"ts":"2026-11-19T03:50:08Z"}
