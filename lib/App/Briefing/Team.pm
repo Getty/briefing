@@ -356,20 +356,56 @@ sub findings {
 
     my $findings = App::Briefing::Team->new( briefing => $briefing )->findings;
 
-Returns one hash per finding with C<what> (C<agent>, C<skill>, C<hook> or
-C<settings>), C<status> (C<ok>, C<missing> or C<warn>), C<name> and C<text>.
-Tabs and line ends in the fields become spaces, so each finding is one TSV row.
-Nothing is printed or changed.
+Returns an array reference of findings, each a hash with C<what> (C<agent>,
+C<skill>, C<settings> or C<hook>, in that order), C<status> (C<ok>, C<missing>
+or C<warn>), C<name> and C<text>. Tabs and line ends in the fields become
+spaces, so each finding is one TSV row. Nothing is printed or changed.
 
 =cut
 
 =description
 
-Checks the Claude Code team under the project's C<.claude/agents>: agent
-frontmatter, every declared skill, the hook's answer for each agent and the
-project settings. Skills resolve through L<App::Briefing/resolve_skill> and the
-hook answers come from L<App::Briefing/process_hook>, the same paths a real
-spawn takes.
+The findings behind C<briefing doctor --tsv>, for tools that check a project's
+Claude Code agent team. It reads the F<.md> files under the project's
+F<.claude/agents>, subdirectories included, and reports:
+
+=for :list
+* C<agent>
+Per agent file: C<missing> for no C<name> or one that differs from the file
+name, an empty C<description>, an C<allowed-tools> key (Claude Code ignores
+it), or a C<briefing.skills> list that cannot be read; C<warn> for a file
+without frontmatter, a dangling symlink, an agent without a briefing, or a
+top-level C<skills:>; else C<ok>. When no agent file has frontmatter, one
+C<missing> finding says so.
+* C<skill>
+Each declared skill once: C<ok>, or C<missing> for every agent that declares it,
+with the reason it does not resolve.
+* C<settings>
+F<.claude/settings.json>: C<missing> when it cannot be read or is not a JSON
+object, when an enabled plugin's marketplace (other than
+C<claude-plugins-official>) is not in C<extraKnownMarketplaces>, or when
+briefing is not enabled; else C<ok>.
+* C<hook>
+What the hooks answer: C<missing> for every agent the guard would deny; for
+one agent, the first whose name ends in C<-worker> or C<-worker-SUFFIX> (else
+the first agent), also the briefing at spawn: C<ok>, C<missing> when skills
+could not be loaded, C<warn> when it briefs nothing. When the guard denies that
+agent, its deny is the only C<hook> finding for it and the spawn briefing is not
+checked for any agent.
+
+Skills resolve through L<App::Briefing/resolve_skill> and the hook answers come
+from L<App::Briefing/process_hook>, so the findings come from the same code a
+real spawn runs.
+
+=seealso
+
+=over
+
+=item * L<briefing> - C<briefing doctor --tsv> prints these findings
+
+=item * L<App::Briefing>
+
+=back
 
 =cut
 

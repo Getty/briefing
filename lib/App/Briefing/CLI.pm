@@ -14,6 +14,13 @@ has _json => ( is => 'lazy', init_arg => undef );
 
 sub app_class { 'App::Briefing' }
 
+=method app_class
+
+The class each command builds its L<App::Briefing> context from,
+C<App::Briefing>. A subclass can return its own.
+
+=cut
+
 sub _build__json {
   my ( $self ) = @_;
   return JSON::MaybeXS->new(
@@ -290,20 +297,33 @@ sub run {
 
     exit App::Briefing::CLI->run(\@ARGV);
 
-Runs one C<hook> (optionally naming its event), C<doctor> (optionally C<--tsv>)
-or C<notice> command and returns its process exit
-code. C<--help> and C<--version> are handled without constructing a briefing
-context. C<hook marketplace-notice> is the plugin's SessionStart entry for the
-one-time marketplace notice and behaves exactly like C<notice>: it reads no
-input, prints the notice or nothing, and exits 0 even when it fails.
+Runs one command line, given as an array reference, and returns its exit
+status; it works as a class or an object method. The commands, their options,
+output and exit statuses are documented in L<briefing>. C<--help> and
+C<--version> answer without building a briefing context. C<hook
+marketplace-notice> behaves exactly like C<notice>: it reads no input, prints
+the note or nothing, and returns 0 even when it fails.
 
 =cut
 
 =description
 
-This is the terminal adapter for L<App::Briefing>. Hook processing, notice
-state and agent resolution remain library operations; this class owns argument
-parsing and standard-stream I/O.
+The terminal side of the L<briefing> command. It parses the command line,
+reads a hook payload from standard input, and writes JSON answers, the
+doctor's report and error messages to standard output and standard error as
+UTF-8. Hook processing, agent resolution and the notice state belong to
+L<App::Briefing>; the team findings of C<briefing doctor --tsv> come from
+L<App::Briefing::Team>.
+
+=seealso
+
+=over
+
+=item * L<briefing> - the command and its options
+
+=item * L<App::Briefing> - what briefing does, and the library
+
+=back
 
 =cut
 

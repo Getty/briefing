@@ -1,5 +1,5 @@
 package App::Briefing;
-# ABSTRACT: Preload declared skills for fresh subagents
+# ABSTRACT: Preload declared skills into Claude Code and Codex subagents at spawn time
 
 use Moo;
 use App::Briefing::Filesystem;
@@ -17,7 +17,8 @@ has filesystem => ( is => 'lazy' );
 
 =attr filesystem
 
-Filesystem adapter. Defaults to a new L<App::Briefing::Filesystem> object.
+The filesystem adapter every file and environment read goes through. Defaults
+to a new L<App::Briefing::Filesystem> object.
 
 =cut
 
@@ -25,8 +26,9 @@ has cwd => ( is => 'lazy' );
 
 =attr cwd
 
-Project context used for agent and skill lookup. Defaults to the process current
-directory without changing it.
+The project directory: agents and skills are looked up as a harness started
+there would look them up. Defaults to C<PWD>, else the process's current
+directory. Nothing changes the process's working directory.
 
 =cut
 
@@ -34,7 +36,10 @@ has home => ( is => 'lazy' );
 
 =attr home
 
-Harness user home. Defaults to C<HOME>, then the platform user home.
+The user's home directory, which holds F<.claude> and F<.agents>. Defaults to
+C<HOME>; on Windows then C<USERPROFILE>, then C<HOMEDRIVE> plus C<HOMEPATH>;
+then the home directory in the user's password entry; then the process's
+current directory. An empty variable counts as unset.
 
 =cut
 
@@ -42,7 +47,8 @@ has codex_home => ( is => 'lazy' );
 
 =attr codex_home
 
-Codex configuration root. Defaults to C<CODEX_HOME> or F<.codex> below C<home>.
+The Codex configuration directory. Defaults to C<CODEX_HOME>, else F<.codex>
+below L</home>.
 
 =cut
 
@@ -703,10 +709,13 @@ sub resolve_skill {
 
 =method resolve_skill
 
-    my $file = $briefing->resolve_skill('plugin:skill', harness => 'claude');
+    my $file = $briefing->resolve_skill('superpowers:brainstorming', harness => 'claude');
 
-Returns the C<SKILL.md> path the spawn hook would read for one declared skill
-name, or nothing. Spawn, pre-flight and the team check share this resolution.
+Returns the path of the F<SKILL.md> a spawn would be briefed with for one
+declared skill name, or nothing when the name does not resolve. C<harness> is
+C<claude> (the default) or C<codex>; each searches where that harness looks
+(see L</DESCRIPTION>). The spawn hooks, the session-start check, the
+doctor and L<App::Briefing::Team> all use this resolution.
 
 =cut
 
@@ -735,10 +744,11 @@ sub skill_problem {
 
 =method skill_problem
 
-    my $reason = $briefing->skill_problem('missing-skill');
+    my $reason = $briefing->skill_problem('superpowers:brainstorming');
 
-Returns a short reason when the Claude Code resolution cannot find the skill,
-nothing when it resolves.
+Returns a short reason why a skill name does not resolve under Claude Code,
+such as C<plugin 'superpowers' is not installed and enabled>, or nothing when
+it resolves.
 
 =cut
 
@@ -752,8 +762,9 @@ sub claude_agent_skills {
 
     my $skills = $briefing->claude_agent_skills($agent_file);
 
-Returns the C<briefing.skills> names the spawn hook reads from one Claude Code
-agent file.
+Returns an array reference of the C<briefing.skills> names declared in one
+Claude Code agent file, read as the spawn hook reads them; empty when the file
+declares none.
 
 =cut
 
@@ -852,10 +863,24 @@ sub brief_agent {
 
     my $result = $briefing->brief_agent('reviewer', harness => 'claude');
 
-Resolves one agent declaration. Returns C<undef> when the harness has no
-briefing-aware agent by that name. A result records the declaration, missing
-skills, UTF-8 byte size and injected text. If any skill is missing, C<text> is
-empty rather than a partial briefing.
+Resolves one agent's declaration for C<harness>, C<claude> or C<codex>
+(required). Returns undef when that harness has no agent by that name or the
+agent declares no skills, else a hash reference:
+
+=for :list
+* C<agent>, C<path>, C<harness>
+The agent's name, its file and the harness.
+* C<skills>
+The declared names, in order.
+* C<missing>
+The names that did not resolve.
+* C<text>
+The C<< <skill> >> elements a spawn receives, without the header. Empty when
+anything is missing: there is never a partial briefing.
+* C<size>
+The UTF-8 size in bytes of the resolved skill text.
+* C<legacy>
+True when a Codex agent declares its skills in a C<[briefing]> table.
 
 =cut
 
@@ -887,8 +912,10 @@ sub check_agents {
 
     my $results = $briefing->check_agents(harness => 'both');
 
-Returns every briefing-aware agent in harness resolution order. It performs the
-same resolution used at spawn time and has no output side effects.
+Returns an array reference with the L</brief_agent> result of every agent that
+declares skills, for C<harness> C<claude>, C<codex> or C<both> (the default):
+Claude Code first, each harness sorted by agent name. The doctor and the
+session-start check report from it. Nothing is printed or written.
 
 =cut
 
@@ -1131,12 +1158,20 @@ sub process_hook {
 
 =method process_hook
 
-    my $operation = $briefing->process_hook($decoded_payload);
+    my $operation = $briefing->process_hook($payload);
+    my $operation = $briefing->process_hook($payload, event => 'SubagentStart');
 
-Evaluates one hook payload and returns C<output>, C<stderr> and C<exit_code>
-without printing or changing files. A payload C<cwd> is used only for that call.
-The optional C<event> (C<SubagentStart>, C<PreToolUse> or C<SessionStart>)
-replaces the payload's C<hook_event_name> for routing.
+Answers one decoded hook payload as the plugin's hooks do. C<SubagentStart>
+briefs the agent, or tells it to abort when a skill is missing; C<SessionStart>
+reports the declarations that would fail; any other payload whose C<tool_name>
+is C<Agent> goes to the Claude Code guard, which denies a spawn with a missing
+skill; everything else has no answer. C<event> (C<SubagentStart>, C<PreToolUse>
+or C<SessionStart>) takes the place of the payload's C<hook_event_name>, and a
+C<cwd> in the payload applies to this call only.
+
+Returns a hash reference with C<output> (the hook's JSON answer as a hash
+reference, or undef for none), C<stderr> (text for standard error, possibly
+empty) and C<exit_code> (0). Nothing is printed or written.
 
 =cut
 
@@ -1196,38 +1231,146 @@ sub process_notice {
 
     my $operation = $briefing->process_notice({});
 
-Evaluates the one-time marketplace notice. Unlike C<process_hook>, this method
-may create the notice state file. It still performs no terminal output itself.
+Evaluates the one-time note that points installs from another marketplace at
+the shared Getty marketplace, and returns the same hash as L</process_hook>.
 The output is empty unless C<CLAUDE_PLUGIN_ROOT> lies in a marketplace cache
 (C<.../cache/MARKETPLACE/...>) other than C<getty> and
-F<.claude/.briefing-marketplace-notice> below C<home> does not exist yet; a
-state file that cannot be written does not suppress the notice.
+F<.claude/.briefing-marketplace-notice> below L</home> does not exist yet.
+Unlike L</process_hook>, this method writes: it creates that state file, so the
+note appears once. A state file that cannot be written does not suppress the
+note. It prints nothing itself.
 
 =cut
 
 =synopsis
 
+Install the plugin in Claude Code:
+
+    /plugin marketplace add Getty/marketplace
+    /plugin install briefing@getty
+
+or in Codex:
+
+    codex plugin marketplace add Getty/marketplace
+    codex plugin add briefing@getty
+
+Declare the skills an agent needs, here in F<.claude/agents/reviewer.md>:
+
+    ---
+    name: reviewer
+    description: Reviews a change and runs the tests
+    briefing:
+      skills:
+        - code-style
+        - superpowers:brainstorming
+    ---
+
+or as a comment line in a Codex agent's TOML file:
+
+    # briefing: skills = ["code-style", "superpowers:brainstorming"]
+
+Check every declaration of a project before anything spawns:
+
+    briefing doctor --cwd ~/dev/shop
+
+Or ask the library the same questions:
+
     use App::Briefing;
 
-    my $briefing = App::Briefing->new(
-      cwd        => '/work/project',
-      home       => '/home/user',
-      codex_home => '/home/user/.codex',
-    );
+    my $briefing = App::Briefing->new( cwd => '/home/you/dev/shop' );
 
-    my $agent = $briefing->brief_agent('reviewer', harness => 'claude');
-    my $all = $briefing->check_agents(harness => 'both');
+    my $result = $briefing->brief_agent( 'reviewer', harness => 'claude' );
+    print "missing: @{ $result->{missing} }\n" if $result && @{ $result->{missing} };
+
+    for my $agent (@{ $briefing->check_agents( harness => 'both' ) }) {
+      printf "%s %s: %d bytes\n", $agent->{harness}, $agent->{agent}, $agent->{size};
+    }
 
 =description
 
-C<App::Briefing> is the reusable implementation behind the C<briefing> source
-CLI. It discovers Claude Code and Codex agents, parses their briefing
-declarations, resolves skills with each harness's precedence and constructs the
-hook result. Missing skills never expose partial briefing text.
+briefing makes sure a subagent starts with the skills it needs. An agent
+declares them; when Claude Code or Codex spawns it, briefing's hook puts the
+full text of each declared skill into the agent's context, so it is briefed
+before its first turn instead of being told in its prompt to go and load them.
+If a declared skill cannot be found, nothing goes ahead on a partial briefing:
+Claude Code refuses the spawn, and a Codex agent, which cannot be stopped at
+that point, is told not to attempt the task and to report the failure.
 
-The object carries an explicit filesystem context. Supplying C<cwd>, C<home>
-and C<codex_home> makes library use and tests independent of process-global
-working-directory changes.
+Most people use briefing as a plugin, installed from the Getty marketplace as
+shown above. Codex runs a plugin's hooks only after you trust them, and loads
+a project's own agents only in a trusted project. The plugin's README covers
+installation, the first agent and what each platform needs:
+L<https://github.com/Getty/briefing>.
+
+A Claude Code agent lists its skills under C<briefing.skills> in its
+frontmatter, one C<- name> per line or as C<[a, b]> on one line. A Codex agent
+carries one comment line, C<# briefing: skills = [...]>, outside any
+multi-line string: Codex drops an agent file over any key it does not know, so
+the declaration has to be a comment. An old C<[briefing]> table is still read,
+and reported as a failure, because Codex 0.153 and later ignores the whole
+agent over it.
+
+Names resolve nearest first, where the harness itself looks. A bare name such
+as C<code-style> comes, under Claude Code, from F<.claude/skills> in the
+project, then F<~/.claude/skills>, then the skills of installed plugins that
+are switched on in C<enabledPlugins>. Under Codex it comes from
+F<.codex/skills> and F<.agents/skills> in the working directory and each parent
+up to the repository root, then F<$CODEX_HOME/skills>, F<~/.agents/skills>,
+F<$CODEX_HOME/skills/.system> and F</etc/codex/skills>, never from a plugin. A
+namespaced name such as C<superpowers:brainstorming> goes straight to that
+plugin: under Claude Code only to one that is installed and enabled, under
+Codex to its plugin cache. Claude Code agents are the F<.md> files under
+F<.claude/agents> in the project, then F<~/.claude/agents>, matched by their
+C<name>; Codex agents are found by C<name> in any F<*.toml> under F<agents/>,
+or through C<[agents.NAME] config_file>, in F<.codex> from the working
+directory up to the repository root, then C<$CODEX_HOME>, then F</etc/codex>.
+
+Each skill arrives as its own element holding the F<SKILL.md> body without its
+frontmatter; C<dir> lets the agent read the skill's F<references/> and
+F<scripts/> when it needs them, as they are not included:
+
+    <skill name="code-style" dir="/home/you/dev/shop/.claude/skills/code-style">
+    ...
+    </skill>
+
+Every briefing leaves you one audit line, such as
+C<< briefing: reviewer E<0x2190> code-style, review-checklist (13 kB) >>, and a
+second one when the skills add up to more than 64 kB; such a spawn still goes
+ahead. When a session starts or resumes, the hook names every declaration of
+that harness that would fail. C<briefing doctor> (see L<briefing>) shows the
+whole picture for both harnesses and exits 1 when a spawn would fail, so it can
+guard CI.
+
+This distribution, App-Briefing, holds briefing's core: this library and the
+command L<briefing>, which runs the hooks and the doctor. The plugin runs the
+same core through its own launcher, as a prebuilt binary once a plugin version
+pins one. Installing App-Briefing gives you the library and the command; it
+does not install the plugin into Claude Code or Codex.
+
+As a library, an App::Briefing object answers for one project. L</cwd>,
+L</home> and L</codex_home> fix the context explicitly, so the answers do not
+depend on the process's working directory, and the methods return data instead
+of printing: L</brief_agent> and L</check_agents> for declarations,
+L</process_hook> for a whole hook payload. Only L</process_notice> writes, its
+one state file. L<App::Briefing::Team> builds the doctor's tab-separated team
+findings on it, and L<App::Briefing::CLI> is the command's terminal side. The
+attributes and methods follow.
+
+=seealso
+
+=over
+
+=item * L<briefing> - the command: hooks and the doctor
+
+=item * L<App::Briefing::CLI> - argument parsing and output of the command
+
+=item * L<App::Briefing::Team> - the findings of C<briefing doctor --tsv>
+
+=item * L<App::Briefing::Filesystem> - file and environment access, Unicode-safe on Windows
+
+=item * L<https://github.com/Getty/briefing> - the plugin, its installation and its status
+
+=back
 
 =cut
 

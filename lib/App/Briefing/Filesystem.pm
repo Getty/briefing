@@ -13,6 +13,15 @@ our $VERSION = '0.001';
 
 sub is_windows { $^O eq 'MSWin32' }
 
+=method is_windows
+
+    $filesystem->is_windows
+
+True on Windows (C<MSWin32>), where file access goes through
+L<Win32::LongPath> and the environment is read through the wide API.
+
+=cut
+
 sub decode_path {
   my ( $self, $value ) = @_;
   return $value unless defined $value;
@@ -21,6 +30,15 @@ sub decode_path {
   my $decoded = eval { decode( 'UTF-8', $value, FB_CROAK ) };
   return $@ ? $value : $decoded;
 }
+
+=method decode_path
+
+    my $path = $filesystem->decode_path($bytes);
+
+Returns a path as a character string: bytes that are valid UTF-8 are decoded,
+anything else, including a string that is already decoded, comes back as it is.
+
+=cut
 
 sub environment_value {
   my ( $self, $name ) = @_;
@@ -86,20 +104,58 @@ sub join_path {
   return path($joined)->stringify;
 }
 
+=method join_path
+
+    my $file = $filesystem->join_path( $root, '.claude', 'agents' );
+
+Joins path parts. After the first part, empty and undefined parts are skipped,
+and an absolute part replaces everything before it. The first part is never
+skipped: if it is empty or undefined, the call dies with Path::Tiny's
+C<Path::Tiny paths require defined, positive-length parts> unless the next
+defined, non-empty part is absolute and so replaces it
+(C<join_path('', '/abs')> returns C</abs>). Without any part it returns the
+empty string.
+
+=cut
+
 sub parent {
   my ( $self, $file ) = @_;
   return path($file)->parent->stringify;
 }
+
+=method parent
+
+    my $directory = $filesystem->parent($file);
+
+Returns the parent directory of a path.
+
+=cut
 
 sub basename {
   my ( $self, $file ) = @_;
   return path($file)->basename;
 }
 
+=method basename
+
+    my $name = $filesystem->basename($file);
+
+Returns the last component of a path.
+
+=cut
+
 sub is_absolute {
   my ( $self, $file ) = @_;
   return path($file)->is_absolute ? 1 : 0;
 }
+
+=method is_absolute
+
+    $filesystem->is_absolute($path)
+
+True for an absolute path.
+
+=cut
 
 sub current_dir {
   my ( $self ) = @_;
@@ -109,6 +165,15 @@ sub current_dir {
   return $self->decode_path($directory);
 }
 
+=method current_dir
+
+    my $cwd = $filesystem->current_dir;
+
+Returns the process's current directory as a character string; on Windows it
+is read with the wide API.
+
+=cut
+
 sub absolute {
   my ( $self, $file ) = @_;
   my $absolute = $self->is_windows
@@ -117,12 +182,29 @@ sub absolute {
   return $self->decode_path($absolute);
 }
 
+=method absolute
+
+    my $absolute = $filesystem->absolute($path);
+
+Returns the absolute form of a path, relative to the current directory. On
+POSIX systems C<.> and C<..> are folded lexically, as in L</normalize>.
+
+=cut
+
 sub exists {
   my ( $self, $file ) = @_;
   return Win32::LongPath::testL( 'e', $file ) ? 1 : 0
     if $self->is_windows;
   return path($file)->exists ? 1 : 0;
 }
+
+=method exists
+
+    $filesystem->exists($path)
+
+True when the path exists.
+
+=cut
 
 sub is_file {
   my ( $self, $file ) = @_;
@@ -131,6 +213,14 @@ sub is_file {
   return path($file)->is_file ? 1 : 0;
 }
 
+=method is_file
+
+    $filesystem->is_file($path)
+
+True for a plain file.
+
+=cut
+
 sub is_dir {
   my ( $self, $file ) = @_;
   return Win32::LongPath::testL( 'd', $file ) ? 1 : 0
@@ -138,12 +228,29 @@ sub is_dir {
   return path($file)->is_dir ? 1 : 0;
 }
 
+=method is_dir
+
+    $filesystem->is_dir($path)
+
+True for a directory.
+
+=cut
+
 sub is_dangling_symlink {
   my ( $self, $file ) = @_;
   return 0 if $self->is_windows;
   my $native = $self->_native_path($file);
   return -l $native && !-e $native ? 1 : 0;
 }
+
+=method is_dangling_symlink
+
+    $filesystem->is_dangling_symlink($path)
+
+True for a symbolic link whose target does not exist. Always false on
+Windows.
+
+=cut
 
 sub is_readable_file {
   my ( $self, $file ) = @_;
@@ -157,6 +264,14 @@ sub is_readable_file {
   close $fh;
   return 1;
 }
+
+=method is_readable_file
+
+    $filesystem->is_readable_file($path)
+
+True for a plain file that can be opened for reading.
+
+=cut
 
 sub _universal_newlines {
   my ( $self, $text ) = @_;
@@ -186,6 +301,15 @@ sub slurp_utf8 {
   return $self->_universal_newlines($text);
 }
 
+=method slurp_utf8
+
+    my $text = $filesystem->slurp_utf8($file);
+
+Returns a file's content decoded from UTF-8, with C<\r\n> and C<\r> turned
+into C<\n>; an empty string when it is not a file or cannot be read.
+
+=cut
+
 sub spew_utf8 {
   my ( $self, $file, $text ) = @_;
 
@@ -204,6 +328,15 @@ sub spew_utf8 {
   return eval { path($file)->spew_utf8($text); 1 } ? 1 : 0;
 }
 
+=method spew_utf8
+
+    $filesystem->spew_utf8( $file, $text );
+
+Writes text to a file as UTF-8, replacing its content. Returns true on
+success.
+
+=cut
+
 sub make_path {
   my ( $self, $directory ) = @_;
   return 1 if $self->is_dir($directory);
@@ -220,6 +353,15 @@ sub make_path {
 
   return eval { path($directory)->mkpath; 1 } ? 1 : 0;
 }
+
+=method make_path
+
+    $filesystem->make_path($directory);
+
+Creates a directory and any missing parents. Returns true when the directory
+exists afterwards.
+
+=cut
 
 sub children {
   my ( $self, $directory ) = @_;
@@ -244,6 +386,15 @@ sub children {
   return [ sort map { $self->decode_path( $_->basename ) } @children ];
 }
 
+=method children
+
+    my $names = $filesystem->children($directory);
+
+Returns an array reference of the names in a directory, sorted, without
+C<.> and C<..>; empty when the path is not a readable directory.
+
+=cut
+
 sub child_directories {
   my ( $self, $directory ) = @_;
   return [
@@ -253,6 +404,15 @@ sub child_directories {
   ];
 }
 
+=method child_directories
+
+    my $directories = $filesystem->child_directories($directory);
+
+Returns an array reference of the paths of a directory's subdirectories, in
+name order.
+
+=cut
+
 sub walk_files {
   my ( $self, $root, $suffix ) = @_;
   return [] unless $self->is_dir($root);
@@ -261,6 +421,16 @@ sub walk_files {
   $self->_walk_files_into( \@files, $root, $suffix );
   return \@files;
 }
+
+=method walk_files
+
+    my $files = $filesystem->walk_files( $root, '.toml' );
+
+Returns an array reference of the paths of every file below C<$root>, at any
+depth, whose name ends in the suffix. A directory's own files come before
+those of its subdirectories.
+
+=cut
 
 sub _walk_files_into {
   my ( $self, $files, $directory, $suffix ) = @_;
@@ -316,6 +486,16 @@ sub normalize {
   return $normalized;
 }
 
+=method normalize
+
+    my $key = $filesystem->normalize($path);
+
+Returns a path for comparison: repeated separators, C<.> and C<..> folded
+lexically. On Windows backslashes also become slashes and the result is lower
+case.
+
+=cut
+
 sub within {
   my ( $self, $file, $root ) = @_;
   my $normalized_file = $self->normalize($file);
@@ -325,17 +505,47 @@ sub within {
   return index( $normalized_file, $prefix ) == 0 ? 1 : 0;
 }
 
+=method within
+
+    $filesystem->within( $file, $root )
+
+True when C<$file> is C<$root> or lies below it, compared after
+L</normalize>.
+
+=cut
+
 sub relative {
   my ( $self, $file, $root ) = @_;
   return path($file)->relative($root)->stringify;
 }
 
+=method relative
+
+    my $relative = $filesystem->relative( $file, $root );
+
+Returns C<$file> relative to C<$root>.
+
+=cut
+
 =description
 
-This adapter keeps all filesystem access used by App::Briefing in one place.
-POSIX systems use L<Path::Tiny>. Windows uses explicit L<Win32::LongPath>
-operations so Unicode and long paths are not routed through Perl's ordinary
-file tests or C<open>. It does not install global filesystem overrides.
+Every file access and environment read of L<App::Briefing> goes through this
+adapter. Paths go in and come out as character strings. POSIX systems use
+L<Path::Tiny>. Windows uses explicit L<Win32::LongPath> operations, so Unicode
+and long paths never pass through Perl's ordinary file tests or C<open>, and
+reads the environment through the wide API. It installs no global filesystem
+overrides.
+
+An App::Briefing object takes another adapter through its C<filesystem>
+attribute; it has to provide the methods below.
+
+=seealso
+
+=over
+
+=item * L<App::Briefing>
+
+=back
 
 =cut
 
