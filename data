@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T08:53:01Z
+id: 32
+priority: low
+status: backlog
+tags:
+- docs
+- examples
+title: examples/README.md contradicts the demo agent
+updated: 2026-11-19T08:53:01Z
+---
+
+Found in k23 review (HEAD 40c7bb3). examples/README.md:7,16 tells the reader to add the skill to a skills: list; examples/agents/briefing-demo.md:3-6 declares it under briefing.skills, with allowed-tools Read, Bash (so the agent could read the skill file itself, which weakens the demo's proof). Done when the README describes the actual declaration and the demo's claim holds.
