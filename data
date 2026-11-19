@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T08:53:05Z
+id: 33
+priority: low
+status: backlog
+tags:
+- windows
+- cleanup
+title: hooks/briefing-preload.exe is a leftover launcher
+updated: 2026-11-19T08:53:05Z
+---
+
+Found in k23 review (HEAD 40c7bb3). hooks/briefing-preload.exe exists, but neither hooks/hooks.json nor hooks/codex-hooks.json references it since every hook runs through bin/briefing. Check that nothing else (bootstrap, winlaunch, tests, docs) still starts it; then remove it or write down why it stays.
