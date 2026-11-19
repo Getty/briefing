@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-19T08:30:21Z
+id: 27
+priority: low
+status: backlog
+tags:
+- tests
+title: 'Notice state: contract tests read the state in text mode, so CRLF passes'
+updated: 2026-11-19T08:30:21Z
+---
+
+tests/test_marketplace_notice.py:124 and tests/test_starter.py:1607 compare read_text(), which folds CRLF to LF; only t/20-cli.t caught the Windows CRLF state (k20). The Python hook's newline="\n" has no test that can fail. Done when both compare read_bytes() with b"briefing\n".
