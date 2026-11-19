@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T06:42:33Z
+id: 25
+priority: low
+status: backlog
+tags:
+- docs
+- windows
+title: 'hook-contract.md: Windows exec entry still says it runs the Python hook'
+updated: 2026-11-19T06:42:33Z
+---
+
+Found by the k20 worker (2026-11-19), pre-existing. .claude/skills/briefing-core/references/hook-contract.md describes the Windows exec entry as running the Python hook; since the bootstrap (bin/briefing.exe -> bin/briefing-bootstrap.exe) it runs the cached binary first and Python only as a fallback. Done when the reference matches the bootstrap dispatch.
