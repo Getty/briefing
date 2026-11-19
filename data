@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-19T08:53:09Z
+id: 34
+priority: medium
+status: backlog
+tags:
+- resolution
+title: Resolution ignores CLAUDE_CONFIG_DIR
+updated: 2026-11-19T08:53:09Z
+---
+
+Found in k23 review (HEAD 40c7bb3). Only the starter reads CLAUDE_CONFIG_DIR (bin/briefing:512, for the binary cache). Skills, agents, plugins and settings are read from ~/.claude in lib/App/Briefing.pm and hooks/briefing-preload, so a Claude Code started with CLAUDE_CONFIG_DIR resolves user skills and plugins from a different place than briefing searches. Done when resolution follows Claude Code's own rule for that variable (check Claude Code's documented behaviour first), in both implementations, with tests.
