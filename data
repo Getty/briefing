@@ -1,0 +1,81 @@
+---
+block_reason: 'Waiting at the publish gate: the remaining release steps need the maintainer''s
+  explicit go (list in the latest note).'
+blocked: true
+claimed_at: 2026-11-19T08:53:42Z
+claimed_by: briefing
+class: standard
+created: 2026-11-16T20:44:13Z
+id: 7
+priority: high
+started: 2026-11-17T17:48:43Z
+status: in-progress
+tags:
+- packaging
+- portability
+- agent-construction-kit
+title: Ship standalone briefing binaries (ack-paket; recreated, original k5 card was
+  lost in a sync)
+updated: 2026-11-19T11:29:52Z
+---
+
+Original k5 'Ship standalone briefing binaries without a system Python requirement' vanished from the board when karr synced with origin (id 5 now is the SubagentStart review card). State of work: branch ack-paket 5055596 BOM fix, 47d9ee1 doctor --tsv + hook EVENT, ea7da1d binary via house path (dist.ini binary=briefing, binaries.yml -> dzil-binary.yml@binary-v1) + sh starter bin/briefing, 5025bea hooks via starter, 511154f temporary push trigger (remove before merge). Decisions: fallback without binary = Python hook (a system perl lacks Moo etc.; probing would slow or unbrief spawns); only 'hook session-start' downloads, --version/doctor never; Plugin bin/briefing is the starter, CPAN script is script/briefing; PAR tree beside the binary is not re-verified (cache dir is user-owned). Blocked: CI probe and perl-distribution legs fail because bundle repo has no tag binary-v1 and released bundle 0.327 lacks ::Binary — maintainer must release/tag the bundle first. Open: Windows stays winlaunch->Python until windows-developer #21; Windows native run of t/05 fix and unicode smoke unverified; binary hook latency see k6.
+
+Probe run 43964789676 (ack-paket 06e47ee): binaries build green on linux-x86_64, linux-arm64, macos-arm64, macos-x86_64, windows-x86_64; smoke green on debian:bookworm-slim, almalinux:8/9 (x86_64), almalinux:9 arm64, macos-arm64, macos-x86_64; Windows smoke green for ASCII, Unicode hooks (stdin JSON) and Unicode doctor via process cwd; red only for 'doctor --tsv --cwd <CJK path>' via argv (Perl @ARGV is ANSI on Windows). Open: wide command line on Windows, perl-distribution CI legs need the released bundle (::Binary).
+
+Approved design: docs/superpowers/specs/2026-11-17-standalone-binary-delivery-design.md; implementation plan: docs/superpowers/plans/2026-11-17-standalone-binary-delivery.md
+
+Baseline on be2b19d: prove -lr t PASS (269); Python/Shell syntax PASS; unittest PASS (150, 20 Perl-driver skips recorded); checkout Doctor both PASS; DZIL_BINARY_SKIP=1 dzil build/test PASS (274, release-only skip). Planning docs ready for release-manager commit.
+
+Task 1 complete: approved design and implementation plan committed locally as 9cde1a3 plus approval-state fix 2b37b14; independent task review clean; no push.
+
+Task 2 complete, uncommitted: canonical SHA256SUMS importer + 8 tests; focused suite PASS, full Python suite PASS (157, 20 existing Perl-driver skips); version-token security finding fixed and re-review approved. One Minor (non-LF/CRLF splitlines separators) deferred to final whole-branch review.
+
+Task 3 complete, uncommitted: strict full-manifest validation, gated platform override, Linux sha256sum/macOS native openssl; starter 17 PASS, Python 163 PASS (20 existing skips), Perl 269 PASS; independent review approved.
+
+Task 4 complete, uncommitted: POSIX HTTPS/cache hardening and FD-bound verified execution; 8 security regressions, 36 starter, 182 Python (20 existing skips), 269 Perl PASS; independent security review approved after 4 fix rounds. Native macOS evidence and 2 minor test-quality items remain for final/native review.
+
+Task 5 local implementation complete, uncommitted: reproducible native Windows bootstrap PE + directive; review approved after path-bounds/gate fixes. Cross-build SHA afd38fc3..., 15 focused tests with 7 native Windows skips; local host has no Windows runtime/image, so native process evidence remains open and carried to CI/publish gate (not a pass).
+
+Task 6 local implementation complete, uncommitted: Windows native provisioner/fallbacks statically approved after 4 fix rounds; reproducible PE SHA 9f38714a..., 60,416 bytes; 217 Python/269 Perl green. 30 native Windows process contracts remain open and block release readiness; carried to CI/publish gate.
+
+Task 7 dependency audit: pin reusable binary workflow to remote commit ace48caaecb567990b0e333e4a30737d3e5de3df. Bundle provenance is incomplete; filed p5-dist-zilla-pluginbundle-author-getty k33 for persisted full source/workflow SHA, runner/OS/ABI and probe/release hashes. No external code/publish action taken.
+
+2026-11-18 session (hub brief k7 finish): snapshot fd2b7a3 holds Tasks 2-7. Bundle 0.328 with ::Binary is indexed on CPAN. Task 7 re-review (fresh reviewer): needs fixes - Critical: binaries.yml pins uses@ace48caa but not bundle_ref (defaults to binary-v1, so build/publish scripts run from the mutable tag); Important: bin/briefing-doctor.exe lost its winlaunch byte check, CI sh -n/bash -n with several operands checks only the first file, release evidence fields partly unknowable/wrong. Decision: the smoke step records machine-level evidence only (OS+version, arch, ABI, asset SHA-256); run-level evidence (source commit, resolved workflow SHA, runner image/version) is taken from the GitHub run record at release time; persisted manifest stays bundle k33. Fix round 1 running (test-writer RED, then worker).
+
+Task 9: reviewed local commits cut on k7-standalone-delivery (2a843b8, 2c972d9, e007222, 3fcadff, 8a273bf, 21917f2). Recovery ref: local branch k7-wip-fd2b7a3. prove -lr t 269 OK, unittest 240 OK (58 skipped).
+
+Remaining steps after the local commits 2a843b8..21917f2, each needing the maintainer's go: merge the branch to main; release App::Briefing 0.001 (dzil); binaries workflow on that release; capture run evidence; import and commit the pins; push that commit; update the marketplace; live harness checks (plan Task 11). Procedure: .claude/skills/briefing-core/references/binary-release.md.
+
+Native fix round committed locally on k7-standalone-delivery (not pushed): 9c3f58d macOS starter exec, 6e83518 Windows bootstrap PAR paths, 4cac15b Windows contract tests. k7 stays open and blocked.
+
+Native round 2 (commits 9c3f58d, 6e83518, 4cac15b; CI 44259067810, binaries probe 44259077774 attempt 2):
+- Green natively: simpici, perl-distribution 5.36/5.38/5.40, installed linux-minimum 5.20, installed linux 5.40, installed windows 5.40; probe plan, 5 builds, 7 smokes; chain linux-x86_64, linux-arm64, macos-arm64, macos-x86_64.
+- Red: installed macos-intel (starter version rule accepts a non-ASCII version — bracket ranges collate in macOS sh; one swap test never reaches its trigger), bootstrap-windows (5 cache-hit contracts + reparse-test teardown; no hang any more), chain windows-x86_64 (cold provision works, every warm call fails: "cached Windows binary failed its pinned checksum", then "not cached").
+- macOS exec (ruling): the starter runs the verified cache path right after the rehash with the cache checks repeated; a same-user swap between that check and execve remains on macOS — accepted cost, Linux keeps the descriptor exec.
+- Narrowing the Windows argv acceptance for 0.001: recommendation on k8.
+Native fix round 2 in progress (Windows warm path, locale-independent starter patterns, macOS swap test, reparse cleanup).
+
+Native fix round 2 committed on k7-standalone-delivery (not yet pushed): 3dcefad Windows bootstrap warm path uses the extended cache path; f906a81 POSIX starter case patterns use explicit character lists. Checks: prove -lr t 269 ok, unittest 243 ok (59 skip). k7 stays open and blocked.
+
+Native fix round 3 committed as 7044aef (test: trigger the swap test on wc and allow a chosen shell). Review 3 clean; prove -lr t 269 ok, unittest 243 ok (59 skipped). Card stays open and blocked.
+
+Native proofs complete up to the publish gate. Round 3 (3dcefad, f906a81) and round 4 (7044aef) are pushed. Round 4 is CI 44272063573 and binaries probe 44272082930, and it is green on every leg:
+- simpici and perl-distribution 5.36/5.38/5.40;
+- the installed linux-minimum 5.20, linux 5.40, windows 5.40 and macos-intel 5.40 legs;
+- bootstrap-windows, with 43 of 43 tests run natively and none skipped;
+- plan, 5 builds and 7 smokes;
+- the chain on linux-x86_64, linux-arm64, macos-x86_64, macos-arm64 and windows-x86_64. The Windows chain has 2 expected failures: the direct non-ANSI PAR run, and k8.
+- publish was skipped.
+
+Round 3 left only the macOS swap test red. The cause was on the test side: bash 3.2 runs /bin/chmod from its command hash and so skips the chmod shim. The trigger now sits on wc.
+
+Not native yet, because these need the release: the Task 11 live checks, and the cold gate over the network (the probe uses a file:// fixture).
+
+Decisions before the activating pin commit are on k6, k14 and k18. The release hand-off is in the hub report report-briefing-k7-abschluss.md.
+
+Maintainer decision 2026-11-19 (via the agent-construction-kit session): push k7-standalone-delivery once k14, k18 and k20 are committed; merge into main by fast-forward push once CI is green on Linux, macOS and Windows. Red CI sends the card back to the team, no merge. The pin commit stays with the maintainer.
+
+From k23 (README/POD rework): when the pin commit lands, update README Status ('The standalone binary is off in this version', the two runtime tables, 'What has been shown') and the CPAN line in Develop ('It is not on CPAN yet') to the shipped state.
+
+2026-11-19 12:40 (main agent): k7-standalone-delivery fast-forwarded into main at 4253d8e on Getty's word ("merge alles rein", after green CI). Branch CI 44511160691 and binaries probe 44511160869 green on Linux, macOS and Windows, with marked known failures on Windows only (k14 non-ANSI HOME, k8, non-ANSI PAR directory); main CI 44513341515 and test 44513341581 green. Installed plugin updated (ACK project scope and user scope); a real session loaded 4253d8e, all SessionStart hooks exit 0, ack-scout got ack-core preloaded. Still open on this card: the pin commit and the release, both Getty's; native Windows proof is windows-developer k22 (new probe 4253d8e noted there).
