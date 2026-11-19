@@ -48,10 +48,14 @@ Revision history for briefing
     page by changing into it, not through `briefing doctor --cwd`; Perl
     receives command-line arguments in the ANSI code page there. Hook payloads
     are UTF-8 and not affected.
-  - Windows: a home directory or working directory outside the ANSI code page
-    no longer loses user-level skills. The Perl CLI reads HOME, USERPROFILE,
-    HOMEDRIVE/HOMEPATH, CODEX_HOME, PWD and CLAUDE_PLUGIN_ROOT through the wide
-    environment (Win32 is now required on Windows) (k14).
+  - Windows: the Perl command, and once a version pins binaries the binary,
+    cannot use a home or another environment path (HOME, USERPROFILE,
+    HOMEDRIVE/HOMEPATH, CODEX_HOME, CLAUDE_PLUGIN_ROOT, PWD) with characters
+    outside the ANSI code page: the Perl process already holds them as "?".
+    User-level skills under such a home are not found and the marketplace
+    notice cannot record that it was shown. The Python hooks are not affected.
+    Characters of the ANSI code page arrive as characters, read through the
+    wide environment (Win32 is a Windows prerequisite) (k14).
   - Windows binary cache: the pinned binary now lives in
     `<config>/briefing/bin/<version>/<first 16 hex of the pin>/briefing[.exe]`
     with PAR's `par/` directory beside it, so PAR's loader gets the plain long

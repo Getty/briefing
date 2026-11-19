@@ -484,6 +484,13 @@ Not yet shown:
   affects the doctor only where it runs on Perl (`--tsv`, or no Python); once
   a version pins binaries, every `briefing doctor`. Hook payloads arrive as
   UTF-8 and are not affected.
+- On Windows, the Perl command, and once a version pins binaries the binary,
+  cannot use a home directory (`HOME`, `USERPROFILE`, `HOMEDRIVE` plus
+  `HOMEPATH`) or another path from the environment (`CODEX_HOME`,
+  `CLAUDE_PLUGIN_ROOT`, `PWD`) with characters outside the ANSI code page: the
+  Perl process already sees them as `?`. User-level skills under such a home
+  are not found, and the marketplace notice cannot record that it was shown.
+  The Python hooks are not affected.
 - Once binaries are pinned: a configuration directory (`~/.claude` or
   `CLAUDE_CONFIG_DIR`) that is, or lies below, a symbolic link (on Windows, a
   reparse point) keeps the binary from being used, and the plugin runs as

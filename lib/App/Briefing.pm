@@ -1366,7 +1366,7 @@ attributes and methods follow.
 
 =item * L<App::Briefing::Team> - the findings of C<briefing doctor --tsv>
 
-=item * L<App::Briefing::Filesystem> - file and environment access, Unicode-safe on Windows
+=item * L<App::Briefing::Filesystem> - environment access, and file access that is Unicode-safe on Windows
 
 =item * L<https://github.com/Getty/briefing> - the plugin, its installation and its status
 

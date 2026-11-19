@@ -58,9 +58,12 @@ sub environment_value {
 
 Returns the environment variable as a character string, or undef when it is
 unset or empty. On Windows the value comes from the process's wide environment,
-so characters outside the ANSI code page, which C<%ENV> has already replaced,
-arrive intact. Elsewhere, and on Windows when the wide read yields nothing, the
-C<%ENV> bytes are decoded as UTF-8 and kept as they are when they are not.
+so characters of the ANSI code page, whichever it is, arrive as characters
+rather than code page bytes. Characters outside that code page are already
+C<?> in that environment by the time Perl code runs (seen with Strawberry
+Perl) and cannot be recovered. Elsewhere, and on Windows when the wide read
+yields nothing, the C<%ENV> bytes are decoded as UTF-8 and kept as they are
+when they are not.
 
 =cut
 
