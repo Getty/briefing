@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T08:52:44Z
+id: 28
+priority: low
+status: backlog
+tags:
+- doctor
+- cli
+title: Doctor and audit line round the briefing size differently
+updated: 2026-11-19T08:52:44Z
+---
+
+Found in k23 review (2026-11-19, HEAD 40c7bb3). The doctor rounds kB down with int (lib/App/Briefing/CLI.pm:230-231); the audit line rounds to nearest, half to even (lib/App/Briefing.pm:976-988). One briefing can show as 13 kB in the doctor and 14 kB in the audit line. Done when both use one rounding (and the Python hook agrees), with a test.
