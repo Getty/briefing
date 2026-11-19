@@ -315,9 +315,10 @@ sub spew_utf8 {
 
   if ($self->is_windows) {
     my $fh;
+    # openL keeps the default :crlf layer; :raw matches Path::Tiny's LF bytes.
     return 0 unless Win32::LongPath::openL(
       \$fh,
-      '>:encoding(UTF-8)',
+      '>:raw:encoding(UTF-8)',
       $file,
     );
     my $ok = print {$fh} $text;

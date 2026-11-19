@@ -59,7 +59,8 @@ def main():
         return
     try:
         os.makedirs(os.path.dirname(state), exist_ok=True)
-        with open(state, "w", encoding="utf-8") as f:
+        # newline="\n": the same LF bytes on every platform, like the Perl CLI.
+        with open(state, "w", encoding="utf-8", newline="\n") as f:
             f.write(current + "\n")
     except OSError:
         # Cannot record it. Saying it every session beats never saying it.
