@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T08:53:25Z
+id: 38
+priority: medium
+status: backlog
+tags:
+- dist
+- cpan
+title: CPAN tarball ships development and plugin files
+updated: 2026-11-19T08:53:25Z
+---
+
+Found in k23 review (HEAD 40c7bb3). dzil build gathers CLAUDE.md, TODO.md, docs/, prototypes/, tests/, hooks/, skills/, winlaunch/, briefing-bootstrap/, misc and assets into the CPAN distribution; only bin/ is excluded (dist.ini gather_exclude_match). Decide what App-Briefing should ship (the library, script/briefing, t/, the cpanfile and the dist files) and exclude the rest; inspect the generated file list explicitly.
