@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T08:53:17Z
+id: 36
+priority: medium
+status: backlog
+tags:
+- resolution
+- codex
+title: Codex plugin:skill resolution takes the first sorted version directory
+updated: 2026-11-19T08:53:17Z
+---
+
+Found in k23 review (HEAD 40c7bb3). A namespaced skill under Codex resolves to the first version directory, in sorted order, of $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/ that holds the skill (lib/App/Briefing.pm:634-645). With several cached versions that may not be the version Codex loads. Scout first: which version does Codex use, and does the Python hook do the same? Then fix both, with a test of two cached versions.
