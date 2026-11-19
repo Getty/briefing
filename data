@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-19T08:53:21Z
+id: 37
+priority: medium
+status: backlog
+tags:
+- docs
+title: PRIVACY.md describes old behaviour
+updated: 2026-11-19T08:53:21Z
+---
+
+Found in k23 review (HEAD 40c7bb3). PRIVACY.md:18-19 still describes the PreToolUse prompt rewrite, :28 says no network and :33 says no writes. Today the marketplace notice writes a state file, and once a plugin version pins binaries the SessionStart hook downloads one from the GitHub release. Done when PRIVACY.md states what is read, written and fetched, per the current code.
