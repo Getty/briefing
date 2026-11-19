@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T08:52:57Z
+id: 31
+priority: medium
+status: backlog
+tags:
+- hooks
+- codex
+title: Session-start message tells Codex users to run briefing-doctor
+updated: 2026-11-19T08:52:57Z
+---
+
+Found in k23 review (HEAD 40c7bb3). The session-start systemMessage says 'run briefing-doctor for details' (lib/App/Briefing.pm:1118-1119, and the Python hook's equivalent). Codex does not put a plugin's bin/ on PATH, so a Codex user cannot run it; the README (k23) tells them to run the plugin's bin/briefing doctor from the Codex plugin cache. Done when the Codex message names a command that works there, Python hook and Perl core alike, with a contract test.
