@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T08:52:53Z
+id: 30
+priority: medium
+status: backlog
+tags:
+- starter
+- perl
+title: 'Starter: Perl probe accepts a perl that lacks TOML::Tiny'
+updated: 2026-11-19T08:52:53Z
+---
+
+Found in k23 review (HEAD 40c7bb3). The starter's Perl probe only requires App::Briefing::CLI (bin/briefing:808). Since 1f31000 TOML::Tiny loads lazily on the first Codex parse (lib/App/Briefing.pm:453-465), so a perl without TOML::Tiny passes the probe and fails later on a Codex agent. The reason text at bin/briefing:809 also omits namespace::clean. Check the Windows bootstrap's Perl lookup for the same gap. Done when the probe checks every module the CLI may load and the reason names them, with a test.
