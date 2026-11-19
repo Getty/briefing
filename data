@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T08:53:13Z
+id: 35
+priority: low
+status: backlog
+tags:
+- doctor
+- cli
+title: Doctor treats a nonexistent --cwd inconsistently
+updated: 2026-11-19T08:53:13Z
+---
+
+Found in k23 review (HEAD 40c7bb3). doctor --tsv checks that --cwd is a directory and exits 2 (lib/App/Briefing/CLI.pm:159-165); plain doctor does not check (CLI.pm:195-209) and prints 'no agents declare skills' with exit 0, which hides a typo in CI. Done when both forms agree (and the Python hook doctor too), with a test.
