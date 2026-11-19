@@ -10,7 +10,8 @@
 # without Perl, in non-ASCII paths.
 #
 # Compared with the reference, in an ASCII project, STDOUT and exit code: --version, --help,
-# doctor --tsv, hook subagent-start, hook pre-tool-use (an unknown skill), hook session-start.
+# doctor --tsv, hook subagent-start, hook pre-tool-use (an unknown skill), hook session-start,
+# and hook subagent-start for a Codex TOML agent (the only case that runs TOML::Tiny).
 # Also: no TLS module is inside the archive (briefing has no network access).
 set -euo pipefail
 
@@ -68,6 +69,19 @@ broken_agent ascii # from here on the project also has an agent with an unknown 
 same_as_perl subagent-start "$work/in-start" hook subagent-start
 same_as_perl pre-tool-use "$work/in-pre" hook pre-tool-use
 same_as_perl session-start "$work/in-session" hook session-start
+
+# Codex: App::Briefing loads TOML::Tiny only on the first TOML parse, so none of the cases
+# above runs it. This agent declares its skill in a [briefing] table: the briefing exists only
+# if TOML::Tiny parses the file inside the binary, and the \u escape makes it load the
+# charnames data at run time as well.
+mkdir -p "$dir/.codex/agents" "$dir/.agents/skills/codex-skill"
+printf 'CODEX-MARKER\n' >"$dir/.agents/skills/codex-skill/SKILL.md"
+printf 'name = "codex-demo"\ndescription = "caf\\u00e9"\n\n[briefing]\nskills = ["codex-skill"]\n' \
+  >"$dir/.codex/agents/codex-demo.toml"
+printf '{"hook_event_name":"SubagentStart","agent_type":"codex-demo","agent_id":"a","turn_id":"t","cwd":"%s"}' \
+  "$ndir" >"$work/in-codex"
+same_as_perl codex-subagent-start "$work/in-codex" hook subagent-start
+grep -qF CODEX-MARKER "$work/got" || fail "codex-subagent-start: the briefing lacks the skill text: $(head -c 300 "$work/got")"
 
 # The zip central directory of a PAR executable names every packed file in clear.
 if grep -aq -e 'Net/SSLeay' -e 'IO/Socket/SSL' "$BIN"; then

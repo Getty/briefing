@@ -7,7 +7,6 @@ use B qw( SVf_POK SVp_POK svref_2object );
 use Carp qw( croak );
 use Encode qw( encode_utf8 );
 use JSON::MaybeXS ();
-use TOML::Tiny::Parser;
 use namespace::clean;
 
 our $VERSION = '0.001';
@@ -453,10 +452,24 @@ sub _parse_skills_comment {
   return [];
 }
 
+sub _toml_parser {
+  my ( $self ) = @_;
+  my $parser_class = $self->toml_parser_class;
+  # Loaded on first use, not with this module: compiling TOML::Tiny::Parser is a large share
+  # of every start-up, and only Codex TOML files need it. This stays outside the parse eval,
+  # so a missing parser dies loudly instead of making every Codex agent declare nothing.
+  # A parser class that is already defined (an inline override) is used as it is.
+  unless ($parser_class->can('new')) {
+    ( my $file = $parser_class.'.pm' ) =~ s{::}{/}g;
+    require $file;
+  }
+  return $parser_class;
+}
+
 sub _parse_toml {
   my ( $self, $text ) = @_;
   return {} unless defined $text && length $text;
-  my $parser_class = $self->toml_parser_class;
+  my $parser_class = $self->_toml_parser;
   my $document = eval {
     $parser_class->new(
       strict           => 1,

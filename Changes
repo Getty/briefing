@@ -38,6 +38,9 @@ Revision history for briefing
     The plugin starts using them only from a later plugin update that pins
     their checksums (`bin/briefing-binaries.sha256`); until then the hooks run
     the Python hook as before.
+  - Faster start-up: `TOML::Tiny::Parser` is compiled on the first Codex TOML
+    agent parse, not when `App::Briefing` loads, so Claude Code hooks and the
+    prebuilt binaries skip about 170 ms of compile time per call (k6).
   - Windows without a pinned binary: the bootstrap starts the first Python it
     finds (`python3`, `python`, then `py -3`; the Microsoft Store stub is
     skipped), in UTF-8 mode.
