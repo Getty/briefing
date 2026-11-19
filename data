@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-19T05:00:22Z
+id: 22
+priority: low
+status: backlog
+tags:
+- windows
+title: 'Windows: home fallback dies in getpwuid when HOME, USERPROFILE and HOMEDRIVE+HOMEPATH
+  are all unset'
+updated: 2026-11-19T09:08:26Z
+---
+
+Found by the k14 worker and reviewer (2026-11-19), pre-existing, outside k14. App::Briefing::_build_home (lib/App/Briefing.pm, last branch) ends in getpwuid, which Perl does not implement on Win32 (perlport; Win32 config has d_getpwent undef). With HOME, USERPROFILE and HOMEDRIVE+HOMEPATH all unset or empty the CLI dies instead of falling back. Done when the Windows branch never reaches getpwuid and states a clear error or fallback, with a test.
+
+k23 (README/POD) documents App::Briefing's home fallback as HOME; on Windows USERPROFILE, then HOMEDRIVE+HOMEPATH; then the password entry; then the current directory (lib/App/Briefing.pm:86). On Windows the getpwuid step dies first (this card), so the current-directory fallback is not reached there until this is fixed.
