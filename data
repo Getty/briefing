@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-19T09:48:39Z
+id: 40
+priority: low
+status: backlog
+tags:
+- hooks
+title: SessionStart warns about skills that skilletor installs in the same start
+updated: 2026-11-19T09:48:39Z
+---
+
+Found by the agent-construction-kit session's real-use check, 2026-11-19. Setup: a fresh clone of agent-construction-kit, plugins skilletor a4cbd48 and briefing 40c7bb3 from --plugin-dir, and a copy of the real state. In that start, briefing's session-start check said: 'briefing: declared skills that will not work — run briefing-doctor for details / Claude Code agent ack-release-manager: unknown skill(s): getty-git-commit-style, getty-git-usage'. skilletor's SessionStart hook installed exactly those two skills into the project in the same start ('skilletor: 5 item(s) updated'). Claude Code runs the SessionStart hooks in parallel, so briefing checked before the sync was done. The warning is false and shows up only on the first start after a clone or after a new skill is declared. Spawns were fine: ack-scout got ack-core preloaded. Possible ways out: check again when the warning would fire (re-resolve at SubagentStart, which already happens), word the session-start message as 'not found yet', or wait briefly for skilletor's sync.lock if there is one. Evidence: ~/tmp/real-use-2026-11-19/notes.md on reuben.
