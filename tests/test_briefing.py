@@ -13,7 +13,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from cli_driver import assert_skill_dir, command_for
+from cli_driver import (assert_skill_dir, command_for,
+                        known_failure_on_windows_perl_cli)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "briefing-preload"
@@ -374,6 +375,10 @@ class BriefingHookTests(unittest.TestCase):
         self.assertIn("PROJECT FOO", prompt)
         self.assertNotIn("USER FOO", prompt)
 
+    @known_failure_on_windows_perl_cli(
+        "k14", "the Perl process on Windows already holds characters outside the ANSI code "
+        "page as \"?\" in its own wide environment, so no read inside Perl recovers a "
+        "non-ANSI HOME")
     def test_user_skill_resolves_from_unicode_home(self):
         unicode_home = self.root / "home-ä-技能"
         unicode_home.mkdir()

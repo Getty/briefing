@@ -73,6 +73,20 @@ WARNING = r"^briefing: no binary \(.+\) and no fallback \(.+\)\.$"
 # k8: on Windows argv reaches Perl in the ANSI code page, so a non-ANSI --cwd cannot work yet.
 expected_failure_on_windows = unittest.expectedFailure if IS_WINDOWS else (lambda test: test)
 
+K14_REASON = (
+    "the Perl process on Windows already holds characters outside the ANSI code page as "
+    "\"?\" in its own wide environment, so no read inside Perl recovers a non-ANSI HOME"
+)
+
+
+def expected_failure_on_windows_k14(test):
+    """Known failure on Windows only (k14); the claim is hard on every other platform."""
+    if not IS_WINDOWS:
+        return test
+    test.__doc__ = ((test.__doc__ or "") + "\nKnown failure on Windows, card k14: "
+                    + K14_REASON).strip()
+    return unittest.expectedFailure(test)
+
 
 def host_platform():
     system = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}.get(platform.system())
@@ -581,10 +595,11 @@ class ChainTests(unittest.TestCase):
         self.assertEqual(unknown.stdout, b"")
         self.assertNotEqual(unknown.stderr.strip(), b"", "the error text did not reach stderr")
 
+    @expected_failure_on_windows_k14
     def test_6a_user_skill_resolves_from_a_non_ansi_home(self):
-        # k20: splits a failing 6b. The home below is outside the ANSI code page (世界), so a
-        # briefing that reads HOME wrongly cannot find the user-level skill (the read is
-        # broken); if this passes while 6b fails, reading HOME works and writing under it fails.
+        # k20/k14: the home below is outside the ANSI code page (世界). The read of HOME is
+        # what fails natively on Windows (the Perl process already holds HOME with "?"), so
+        # this is an expected failure there (k14) and a hard claim everywhere else.
         config = self.new_config()
         self.provision(config)
         home = self.root / ("Heim-Skill-ä-世界-" + self._testMethodName)
@@ -618,10 +633,23 @@ class ChainTests(unittest.TestCase):
     def test_6b_marketplace_notice_shows_once_then_silence_without_perl_or_python(self):
         # k20: the SessionStart notice is `hook marketplace-notice` of the provisioned binary.
         # PATH holds neither Perl nor Python (setUpClass), so only the binary can print it.
+        # The home is ASCII-only and outside cls.root (non-ANSI), so the full claim is hard
+        # on every platform; the non-ANSI home is 6c.
+        home = Path(tempfile.mkdtemp(prefix="briefing-notice-home-"))
+        self.addCleanup(shutil.rmtree, str(home), True)
+        self.assert_notice_once_then_silence(home)
+
+    @expected_failure_on_windows_k14
+    def test_6c_marketplace_notice_records_its_state_under_a_non_ansi_home(self):
+        # k14: the same claim under a home outside the ANSI code page (世界). The read of HOME
+        # fails natively on Windows, so this is an expected failure there and hard elsewhere.
+        home = self.root / ("Heim-Hinweis-ä-世界-" + self._testMethodName)
+        self.assert_notice_once_then_silence(home)
+
+    def assert_notice_once_then_silence(self, home):
         config = self.new_config()
         self.provision(config)
         requests = len(self.server.paths)
-        home = self.root / ("Heim-Hinweis-ä-世界-" + self._testMethodName)
         (home / ".claude").mkdir(parents=True, exist_ok=True)
         cache = home / ".claude" / "plugins" / "cache"
         windows_home = {"USERPROFILE": str(home)} if IS_WINDOWS else {}
