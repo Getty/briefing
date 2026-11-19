@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-19T06:42:39Z
+id: 26
+priority: medium
+status: backlog
+tags:
+- windows
+- bootstrap
+- hooks
+title: 'Bootstrap: failures before hook recognition exit 1 for every hook'
+updated: 2026-11-19T06:42:39Z
+---
+
+Found by the k20 worker (2026-11-19), pre-existing. briefing-bootstrap.c fails with exit 1 when a step before it has recognised the hook command fails (for example its own executable path cannot be determined), for every hook. A hook should never fail (bin/briefing exits 0 with one warning line for hook commands; a courtesy notice stays silent). Related: k21 (uncaught die exits 2). Done when every hook path of the bootstrap exits 0 with the hook-appropriate output, with a native test.
