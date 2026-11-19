@@ -2985,6 +2985,161 @@ class BootstrapProcessTests(unittest.TestCase):
                 self.assertEqual(received, payload, "the UTF-8 payload did not arrive byte-exactly")
 
 
+    # --- the marketplace notice (k20): a verified cached binary, else Python, else silence
+
+    NOTICE_ARGUMENTS = ("hook", "marketplace-notice")
+    SESSION_PAYLOAD = b'{"hook_event_name":"SessionStart","source":"startup"}\n'
+
+    def notice_script(self):
+        return str((self.plugin / "hooks" / "briefing-marketplace-notice").resolve())
+
+    def run_notice(self, path, log=None, exit_status="23", extra=None, bootstrap=None, **kwargs):
+        self.use_production_config()
+        env = self.bootstrap_environment(path=path, mode="record", exit_status=exit_status, **kwargs)
+        if log is not None:
+            env["BRIEFING_BOOTSTRAP_STUB_LOG"] = str(log.resolve())
+        env.pop("PYTHONUTF8", None)
+        env.update(extra or {})
+        return run_bounded(
+            [str(bootstrap or self.bootstrap), *self.NOTICE_ARGUMENTS],
+            30,
+            label="briefing-bootstrap hook marketplace-notice",
+            input_bytes=self.SESSION_PAYLOAD,
+            cwd=str(self.cwd),
+            env=env,
+        )
+
+    def assert_silent_success(self, result):
+        detail = describe_output(result.stdout, result.stderr, result.returncode)
+        self.assertEqual((result.stdout, result.stderr, result.returncode), (b"", b"", 0), detail)
+
+    def provision_cached_fixture(self):
+        """Provision the fixture into the verified cache through session-start; return digest, server."""
+        self.use_production_config()
+        data = self.fixture.read_bytes()
+        digest = sha256(data)
+        self.write_manifest(self.canonical_manifest(data=data))
+        server = AssetServer(self, data=data)
+        provision = self.run_bootstrap(
+            ("hook", "session-start"),
+            env=self.bootstrap_environment(
+                testing=True, base_url=server.base_url, marker=self.marker
+            ),
+        )
+        self.assertEqual(provision.returncode, 0, provision.stderr.decode("utf-8", "replace"))
+        self.assertEqual(self.cached_path(digest=digest).read_bytes(), data)
+        return digest, server
+
+    def test_notice_without_binary_runs_the_python_notice_script_alone(self):
+        python = self.stub_in(self.case_root / "python-only", "python.exe")
+        log = self.case_root / "notice-python.bin"
+        result = self.run_notice(self.fallback_path(python.parent), log)
+        self.assertEqual(result.returncode, 23, result.stderr.decode("utf-8", "replace"))
+        self.assertEqual((result.stdout, result.stderr), (b"", b""))
+        self.assertEqual(
+            self.started_programs(log),
+            [(canonical_path(str(python.resolve())), canonical_args([self.notice_script()]))],
+            "exactly one Python call with the notice script and no hook words",
+        )
+
+    def test_notice_without_binary_uses_the_py_launcher_with_dash_3(self):
+        launcher = self.stub_in(self.case_root / "launcher-only", "py.exe")
+        log = self.case_root / "notice-py.bin"
+        result = self.run_notice(self.fallback_path(launcher.parent), log)
+        self.assertEqual(result.returncode, 23, result.stderr.decode("utf-8", "replace"))
+        self.assertEqual(
+            self.started_programs(log),
+            [(canonical_path(str(launcher.resolve())),
+              canonical_args(["-3", self.notice_script()]))],
+        )
+
+    def test_notice_without_binary_or_python_is_silent_with_exit_zero(self):
+        self.assert_silent_success(self.run_notice(self.empty_path))
+
+    def test_notice_without_its_script_is_silent_and_starts_no_python(self):
+        alternate = self.case_root / "plugin-without-notice"
+        (alternate / "bin").mkdir(parents=True)
+        shutil.copytree(str(REPO_ROOT / "hooks"), str(alternate / "hooks"))
+        (alternate / "hooks" / "briefing-marketplace-notice").unlink()
+        shutil.copyfile(str(self.bootstrap), str(alternate / "bin" / "briefing-bootstrap.exe"))
+        python = self.stub_in(self.case_root / "python-present", "python.exe")
+        log = self.case_root / "notice-no-script.bin"
+        result = self.run_notice(
+            self.fallback_path(python.parent), log,
+            bootstrap=alternate / "bin" / "briefing-bootstrap.exe",
+        )
+        self.assert_silent_success(result)
+        self.assertEqual(self.started_programs(log), [])
+
+    def test_notice_with_a_pin_but_no_cache_never_provisions(self):
+        self.use_production_config()
+        data = self.fixture.read_bytes()
+        self.write_manifest(self.canonical_manifest(data=data))
+        server = AssetServer(self, data=data)
+        python = self.stub_in(self.case_root / "python-pinned", "python.exe")
+        log = self.case_root / "notice-pinned.bin"
+
+        with self.subTest(runtime="python"):
+            result = self.run_notice(
+                self.fallback_path(python.parent), log,
+                testing=True, base_url=server.base_url, marker=self.marker,
+            )
+            self.assertEqual(result.returncode, 23, result.stderr.decode("utf-8", "replace"))
+            self.assertEqual(
+                self.started_programs(log),
+                [(canonical_path(str(python.resolve())), canonical_args([self.notice_script()]))],
+            )
+        with self.subTest(runtime="none"):
+            result = self.run_notice(
+                self.empty_path, testing=True, base_url=server.base_url, marker=self.marker,
+            )
+            self.assert_silent_success(result)
+        self.assertEqual(server.paths, [], "the notice made an HTTP request")
+        self.assert_no_trusted_cache_entry(sha256(data))
+        self.assertFalse(self.marker.exists(), "the notice started the fixture binary")
+
+    def test_notice_with_a_verified_cache_runs_the_binary_with_exactly_the_hook_words(self):
+        digest, server = self.provision_cached_fixture()
+        requests = len(server.paths)
+        python = self.stub_in(self.case_root / "python-beside-cache", "python.exe")
+        log = self.case_root / "notice-cached.bin"
+        result = self.run_notice(
+            self.fallback_path(python.parent), log, exit_status="17", marker=self.marker,
+        )
+        self.assertEqual(result.returncode, 17, result.stderr.decode("utf-8", "replace"))
+        self.assertEqual((result.stdout, result.stderr), (b"", b""))
+        self.assertEqual(
+            self.started_programs(log),
+            [(canonical_path(str(self.cached_path(digest=digest).resolve())),
+              list(self.NOTICE_ARGUMENTS))],
+            "the binary, alone, with exactly the hook words; no Python beside it",
+        )
+        self.assertEqual(len(server.paths), requests, "the notice used the network")
+
+    def test_notice_with_a_tampered_cache_never_runs_it(self):
+        digest, server = self.provision_cached_fixture()
+        requests = len(server.paths)
+        self.marker.unlink()
+        with self.cached_path(digest=digest).open("ab") as handle:
+            handle.write(b"tampered-after-provisioning")
+        python = self.stub_in(self.case_root / "python-after-tamper", "python.exe")
+        log = self.case_root / "notice-tampered.bin"
+
+        with self.subTest(runtime="python"):
+            result = self.run_notice(
+                self.fallback_path(python.parent), log, marker=self.marker,
+            )
+            self.assertEqual(result.returncode, 23, result.stderr.decode("utf-8", "replace"))
+            self.assertEqual(
+                self.started_programs(log),
+                [(canonical_path(str(python.resolve())), canonical_args([self.notice_script()]))],
+            )
+        with self.subTest(runtime="none"):
+            self.assert_silent_success(self.run_notice(self.empty_path, marker=self.marker))
+        self.assertFalse(self.marker.exists(), "the tampered cache was executed")
+        self.assertEqual(len(server.paths), requests, "the notice repaired the cache")
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         EXPLICIT_BOOTSTRAP = Path(sys.argv.pop(1))

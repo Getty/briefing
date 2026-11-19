@@ -108,7 +108,8 @@ here. Doctor, by contrast, shows errors and budget warnings.
 ## Hook files
 
 Both files run the starter `bin/briefing hook EVENT`
-(`pre-tool-use`, `subagent-start`, `session-start`); `additionalContextLimit: 0` on
+(`pre-tool-use`, `subagent-start`, `session-start`, and `marketplace-notice` as the first
+`SessionStart` entry); `additionalContextLimit: 0` on
 `SubagentStart` stays in both. `hooks/hooks.json` serves Claude Code: exec form
 (`command` plus `args`), `PreToolUse` guard included. Codex ignores `args` and runs the
 command text through its shell, so `hooks/codex-hooks.json` (named by
@@ -117,9 +118,19 @@ command text through its shell, so `hooks/codex-hooks.json` (named by
 `${CLAUDE_PLUGIN_ROOT}`. On Windows the exec-form entry starts `bin/briefing.exe`
 (winlaunch), which runs the Python hook. Without a verified cached binary the starter runs
 `hooks/briefing-preload`, so the contract above holds either way; `session-start` is the
-only event that may download the binary. The marketplace notice hook is unchanged. Background and native tests:
+only event that may download the binary. Background and native tests:
 `winlaunch/README.md`.
 
-`hooks/briefing-marketplace-notice` is a separate SessionStart notice with its
-own state storage; the read-only and side-effect-free guarantee of the preload
-hook is not a claim about this notice hook.
+`hook marketplace-notice` is a separate SessionStart notice with its own state file,
+`~/.claude/.briefing-marketplace-notice`; the read-only and side-effect-free guarantee of
+the preload hook is not a claim about it. The binary and the Perl CLI run
+`process_notice` (as `briefing notice` does); without a verified cached binary both
+starters run the Python notice `hooks/briefing-marketplace-notice`, and without a Python
+nothing: no Perl fallback, never the starter's "no fallback" warning. It prints one
+top-level `systemMessage` only when `CLAUDE_PLUGIN_ROOT` lies in a marketplace cache
+(`.../cache/<marketplace>/...`, after lexical normalization) other than `getty` and the
+state file is absent; then it writes that file, and a failed write still prints. Every
+other case is silent with exit 0, errors included in the CLI's notice handler, the Python
+notice and the POSIX starter; a die before that handler runs still exits 2 (`k21`), and a
+bootstrap failure before it recognises the hook exits 1 (`k26`). It reads no payload and
+never provisions.

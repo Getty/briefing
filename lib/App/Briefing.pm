@@ -1144,11 +1144,24 @@ sub _installed_marketplace {
   my ( $self ) = @_;
   my $root = $self->filesystem->environment_value('CLAUDE_PLUGIN_ROOT');
   return unless defined $root;
-  $root =~ tr{\\}{/};
-  my @parts = split m{/+}, $root;
-  for my $index (0 .. $#parts) {
-    return $parts[$index + 1]
-      if $parts[$index] eq 'cache' && $index < $#parts;
+  # The components os.path.normpath gives hooks/briefing-marketplace-notice: "\" separates
+  # only on Windows, "." is dropped and ".." folded lexically, so both stay silent alike.
+  $root =~ tr{\\}{/} if $self->filesystem->is_windows;
+  my $absolute = $root =~ m{\A/} ? 1 : 0;
+  my @parts;
+  for my $part (split m{/+}, $root) {
+    next if $part eq '' || $part eq '.';
+    if ($part eq '..') {
+      if (@parts && $parts[-1] ne '..') {
+        pop @parts;
+        next;
+      }
+      next if $absolute;
+    }
+    push @parts, $part;
+  }
+  for my $index (0 .. $#parts - 1) {
+    return $parts[$index + 1] if $parts[$index] eq 'cache';
   }
   return;
 }
@@ -1185,6 +1198,10 @@ sub process_notice {
 
 Evaluates the one-time marketplace notice. Unlike C<process_hook>, this method
 may create the notice state file. It still performs no terminal output itself.
+The output is empty unless C<CLAUDE_PLUGIN_ROOT> lies in a marketplace cache
+(C<.../cache/MARKETPLACE/...>) other than C<getty> and
+F<.claude/.briefing-marketplace-notice> below C<home> does not exist yet; a
+state file that cannot be written does not suppress the notice.
 
 =cut
 

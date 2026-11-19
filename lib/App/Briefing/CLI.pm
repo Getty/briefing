@@ -29,6 +29,7 @@ sub _usage {
   return <<'USAGE';
 Usage:
   briefing hook [subagent-start|pre-tool-use|session-start]
+  briefing hook marketplace-notice
   briefing doctor [--cwd DIR] [--harness claude|codex|both]
   briefing doctor --tsv [--cwd DIR]
   briefing notice
@@ -231,7 +232,10 @@ sub _run_doctor {
 
 sub _run_notice {
   my ( $self ) = @_;
-  my $result = $self->_application->process_notice({});
+  # A courtesy note never takes a session down: any failure is silence with exit 0, as in
+  # hooks/briefing-marketplace-notice.
+  my $result = eval { $self->_application->process_notice({}) };
+  return 0 unless ref $result eq 'HASH';
   $self->_write_stderr( $result->{stderr} ) if length $result->{stderr};
   $self->_write_json( $result->{output}, 1 ) if defined $result->{output};
   return $result->{exit_code};
@@ -259,6 +263,10 @@ sub run {
   if ($command eq 'hook') {
     return $self->_run_hook if !@arguments;
     if (@arguments == 1) {
+      # The marketplace notice is a SessionStart hook of its own: it owns a state file, which
+      # process_hook never writes. The word is exact, as the starters match it to pick the
+      # notice's fallback.
+      return $self->_run_notice if $arguments[0] eq 'marketplace-notice';
       my $event = $self->_hook_event( $arguments[0] );
       return $self->_run_hook($event) if defined $event;
       # An unknown EVENT word is hook input, not a usage error: a hook never blocks (exit 0).
@@ -285,7 +293,9 @@ sub run {
 Runs one C<hook> (optionally naming its event), C<doctor> (optionally C<--tsv>)
 or C<notice> command and returns its process exit
 code. C<--help> and C<--version> are handled without constructing a briefing
-context.
+context. C<hook marketplace-notice> is the plugin's SessionStart entry for the
+one-time marketplace notice and behaves exactly like C<notice>: it reads no
+input, prints the notice or nothing, and exits 0 even when it fails.
 
 =cut
 

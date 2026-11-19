@@ -109,8 +109,9 @@ never trusted at run time. The starter downloads only at `hook session-start` (n
 `sha256sum`, macOS `openssl dgst -sha256`, never `shasum`), and otherwise falls back: hooks and
 plain `doctor` to `hooks/briefing-preload` (Python), other commands and `doctor --tsv` to the
 plugin's Perl when the machine's perl loads it. A spawn must never run unbriefed, so Perl is no
-hook fallback. The binary is the house path of the `[@Author::GETTY]` bundle (`dist.ini` binary
-keys; `.github/workflows/binaries.yml` calls the bundle's `dzil-binary.yml`, pinned by full SHA
+hook fallback. `hook marketplace-notice` (SessionStart's one-time notice) falls back only to
+`hooks/briefing-marketplace-notice` (Python), else is silent with exit 0. The binary is the
+house path of the `[@Author::GETTY]` bundle (`dist.ini` binary keys; `.github/workflows/binaries.yml` calls the bundle's `dzil-binary.yml`, pinned by full SHA
 together with its `bundle_ref`; an empty `tag` = probe, touches no release).
 `scripts/binary-*.sh` and `scripts/loaded-modules.pl` are its pp arguments, verify and clean-machine
 smoke (also Unicode paths); the assets are `briefing-<version>-<platform>` plus `SHA256SUMS`.

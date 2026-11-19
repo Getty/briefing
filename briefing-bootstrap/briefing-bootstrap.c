@@ -4,6 +4,8 @@
  * The bootstrap accepts only the tracked five-line pin manifest, rehashes the
  * selected Windows binary before every start, provisions it only from the
  * SessionStart hook, and retains the Python/Perl compatibility fallbacks.
+ * `hook marketplace-notice` falls back only to the Python notice and otherwise
+ * stays silent with exit 0: a courtesy note never becomes a warning.
  */
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0601
@@ -3647,10 +3649,15 @@ static wchar_t *find_python(int *launcher)
     return python;
 }
 
-/* The Python hook runs in UTF-8 mode (PYTHONUTF8=1), so it reads the payload on stdin
- * as UTF-8 rather than in the ANSI code page; the caller's value is restored after. */
+/* The Python script hooks\<script> runs in UTF-8 mode (PYTHONUTF8=1), so it reads the
+ * payload on stdin as UTF-8 rather than in the ANSI code page; the caller's value is
+ * restored after. */
 static int run_python_fallback(
-    const wchar_t *plugin_root, int argc, wchar_t **argv, DWORD *status
+    const wchar_t *plugin_root,
+    const wchar_t *script,
+    int argc,
+    wchar_t **argv,
+    DWORD *status
 )
 {
     wchar_t *python = NULL;
@@ -3668,7 +3675,7 @@ static int run_python_fallback(
     python = find_python(&launcher);
     hooks = join_path(plugin_root, L"hooks");
     if (hooks != NULL) {
-        hook = join_path(hooks, L"briefing-preload");
+        hook = join_path(hooks, script);
     }
     if (python == NULL || hook == NULL || !regular_path_exists(hook)) {
         goto cleanup;
@@ -3842,14 +3849,23 @@ static int dispatch_fallback(
     int argc,
     wchar_t **argv,
     int hook,
+    int notice,
     const char *why_binary
 )
 {
     const char *why_other;
     DWORD status = 1;
 
+    if (notice) {
+        if (run_python_fallback(
+                plugin_root, L"briefing-marketplace-notice", argc, argv, &status)) {
+            return (int)status;
+        }
+        return 0;
+    }
     if (hook) {
-        if (run_python_fallback(plugin_root, argc, argv, &status)) {
+        if (run_python_fallback(
+                plugin_root, L"briefing-preload", argc, argv, &status)) {
             return (int)status;
         }
         why_other =
@@ -3857,7 +3873,8 @@ static int dispatch_fallback(
             "or the Python hook is unavailable";
     } else if (argc > 1 && wcscmp(argv[1], L"doctor") == 0) {
         if (!has_tsv_argument(argc, argv) &&
-            run_python_fallback(plugin_root, argc, argv, &status)) {
+            run_python_fallback(
+                plugin_root, L"briefing-preload", argc, argv, &status)) {
             return (int)status;
         }
         if (run_perl_fallback(plugin_root, argc, argv, &status)) {
@@ -4076,6 +4093,7 @@ int wmain(int argc, wchar_t **argv)
     int maximum_present;
     int testing = 0;
     int hook;
+    int notice;
     int can_provision;
     int security_ready = 0;
     int result = 1;
@@ -4101,6 +4119,8 @@ int wmain(int argc, wchar_t **argv)
     hook = argc > 1 && wcscmp(argv[1], L"hook") == 0;
     can_provision = hook && argc > 2 &&
                     wcscmp(argv[2], L"session-start") == 0;
+    notice = hook && argc > 2 &&
+             wcscmp(argv[2], L"marketplace-notice") == 0;
 
     test_child = read_environment(
         L"BRIEFING_BOOTSTRAP_TEST_CHILD", &child_present
@@ -4233,6 +4253,10 @@ int wmain(int argc, wchar_t **argv)
 fallback:
     release_cache_lock(&cache_lock);
     if (security_ready && !restore_token_owner(&security)) {
+        if (notice) {
+            result = 0;
+            goto cleanup;
+        }
         result = report_no_fallback(
             hook,
             "the original process token owner could not be restored",
@@ -4240,7 +4264,7 @@ fallback:
         );
         goto cleanup;
     }
-    result = dispatch_fallback(plugin_root, argc, argv, hook, why_binary);
+    result = dispatch_fallback(plugin_root, argc, argv, hook, notice, why_binary);
 
 cleanup:
     if (binary_lock != INVALID_HANDLE_VALUE) {

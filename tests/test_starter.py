@@ -14,6 +14,7 @@ import http.server
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import stat
@@ -381,6 +382,8 @@ class StarterTest(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if not k.startswith("BRIEFING_")}
         env.update(HOME=str(self.home), CLAUDE_CONFIG_DIR=str(self.config))
         env.pop("PAR_GLOBAL_TEMP", None)
+        # A Claude session's real plugin root must not leak into the notice (k20).
+        env.pop("CLAUDE_PLUGIN_ROOT", None)
         if url is not None:
             env["BRIEFING_BINARY_BASE_URL"] = url
         if now is not None:
@@ -1435,6 +1438,7 @@ class StarterTest(unittest.TestCase):
         commands = (
             ("hook", "subagent-start"),
             ("hook", "pre-tool-use"),
+            ("hook", "marketplace-notice"),
             ("--version",),
             ("--help",),
             ("doctor",),
@@ -1550,6 +1554,139 @@ class StarterTest(unittest.TestCase):
         self.assertEqual([f for f in self.files_left() if not f.endswith(".failed-at")], [])
         self.assert_python_briefed(self.run_starter("hook", "subagent-start"))
 
+
+    # --- the marketplace notice (k20): the binary when verified, else Python, else silence
+
+    NOTICE_START = "briefing is now also in the shared Getty marketplace"
+
+    def notice_env(self, **values):
+        root = self.home / ".claude" / "plugins" / "cache" / "briefing" / "briefing" / "0.1.0"
+        env = {"CLAUDE_PLUGIN_ROOT": str(root)}
+        env.update(values)
+        return env
+
+    def notice_state(self):
+        return self.home / ".claude" / ".briefing-marketplace-notice"
+
+    def run_notice(self, extra_env=None, **kwargs):
+        stdin = json.dumps({"hook_event_name": "SessionStart", "source": "startup",
+                            "cwd": str(self.proj)})
+        return self.run_starter("hook", "marketplace-notice", stdin=stdin,
+                                extra_env=self.notice_env(**(extra_env or {})), **kwargs)
+
+    def python_free_path(self):
+        """A PATH of every ordinary tool the starter may use and no Python or Perl."""
+        farm = self.tmp / "python-free-path"
+        farm.mkdir(exist_ok=True)
+        refused = re.compile(r"^(python|py$|perl|cpan|pip)")
+        for directory in ("/usr/bin", "/bin", "/usr/sbin", "/sbin"):
+            if not os.path.isdir(directory):
+                continue
+            for name in sorted(os.listdir(directory)):
+                target = os.path.join(directory, name)
+                link = farm / name
+                if (refused.match(name) or link.is_symlink() or not os.path.isfile(target)
+                        or not os.access(target, os.X_OK)):
+                    continue
+                os.symlink(target, str(link))
+        for name in os.listdir(str(farm)):
+            self.assertIsNone(refused.match(name), "the PATH farm contains " + name)
+        for tool in ("python3", "python"):
+            self.assertIsNone(shutil.which(tool, path=str(farm)))
+        return str(farm)
+
+    def assert_silent(self, result):
+        self.assertEqual((result.stdout, result.stderr, result.returncode), ("", "", 0))
+
+    def test_notice_without_pin_runs_the_python_notice_once(self):
+        first = self.run_notice()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(first.stderr, "")
+        message = json.loads(first.stdout)["systemMessage"]
+        self.assertTrue(message.startswith(self.NOTICE_START), message)
+        self.assertEqual(self.notice_state().read_text(encoding="utf-8"), "briefing\n")
+        self.assert_silent(self.run_notice())
+
+    def test_notice_is_silent_where_the_python_notice_is_silent(self):
+        getty = self.home / ".claude" / "plugins" / "cache" / "getty" / "briefing" / "0.1.0"
+        for label, extra in (("getty marketplace", {"CLAUDE_PLUGIN_ROOT": str(getty)}),
+                             ("outside a cache", {"CLAUDE_PLUGIN_ROOT": str(self.plugin)})):
+            with self.subTest(case=label):
+                self.assert_silent(self.run_notice(extra_env=extra))
+        # No plugin root at all (run_starter alone leaves it unset).
+        self.assert_silent(self.run_starter("hook", "marketplace-notice"))
+        self.assertFalse(self.notice_state().exists())
+
+    def test_notice_without_python_is_silent_and_leaves_no_state(self):
+        bindir, log = self._fake_source()
+        path = "%s%s%s" % (bindir, os.pathsep, self.python_free_path())
+        notice = self.run_notice(extra_env={"PATH": path})
+        self.assert_silent(notice)
+        self.assertFalse(self.notice_state().exists())
+        self.assertFalse(log.exists(), "the notice started a downloader")
+        self.assertFalse((self.config / "briefing").exists(), self.files_left())
+        # The contrast: every other hook still warns in the same PATH.
+        spawn = self.run_starter("hook", "subagent-start", extra_env={"PATH": path})
+        self.assertEqual(spawn.returncode, 0, spawn.stderr)
+        self.assertRegex(json.loads(spawn.stdout)["systemMessage"],
+                         r"^briefing: no binary \(.+\) and no fallback \(.+\)\.$")
+
+    def test_notice_with_python_but_without_the_script_is_silent(self):
+        # The notice script is gone; the other hook script goes too, so that no stray Python
+        # hook can answer: a courtesy note never turns into the "no fallback" warning.
+        (self.plugin / "hooks" / "briefing-marketplace-notice").unlink()
+        (self.plugin / "hooks" / "briefing-preload").unlink()
+        self.assert_silent(self.run_notice())
+        self.assertFalse(self.notice_state().exists())
+
+    def test_notice_with_verified_cache_runs_the_binary_with_exactly_the_hook_words(self):
+        self.pin()
+        self.cached_binary(self.asset)
+        bindir, log = self._fake_source()
+        path = "%s%s%s" % (bindir, os.pathsep, self.python_free_path())
+        result = self.run_notice(url="https://fixtures.invalid", now=NOW,
+                                 extra_env={"PATH": path})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "FAKE %s|hook marketplace-notice\n" % self.par_dir())
+        self.assertEqual(result.stderr, "")
+        self.assertFalse(log.exists(), "the notice attempted a download")
+        self.assertFalse(self.notice_state().exists(), "the Python notice ran beside the binary")
+
+    def test_notice_with_a_pin_but_no_cache_never_provisions(self):
+        data = self.marker_binary()
+        self.pin(data)
+        bindir, log = self._fake_source()
+        path = "%s%s%s" % (bindir, os.pathsep, os.environ["PATH"])
+        result = self.run_notice(url=self.serve(data), now=NOW, testing=True,
+                                 extra_env={"PATH": path})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["systemMessage"].startswith(self.NOTICE_START))
+        self.assertFalse(self.execution_marker.exists())
+        self.assertFalse(log.exists(), "the notice started a downloader")
+        self.assertFalse((self.config / "briefing").exists(), self.files_left())
+        # And with no Python to fall back to: silent, still nothing provisioned.
+        self.notice_state().unlink()
+        silent = self.run_notice(url=self.serve(data), now=NOW, testing=True,
+                                 extra_env={"PATH": "%s%s%s" % (bindir, os.pathsep,
+                                                                self.python_free_path())})
+        self.assert_silent(silent)
+        self.assertFalse(log.exists(), "the notice started a downloader")
+        self.assertFalse((self.config / "briefing").exists(), self.files_left())
+
+    def test_notice_with_a_tampered_cache_never_runs_it(self):
+        data = self.marker_binary()
+        self.pin(data)
+        cached = self.cached_binary(self.asset, data)
+        with open(str(cached), "ab") as handle:
+            handle.write(b"\nprintf 'tampered cache ran\\n'\n")
+        python = self.run_notice()
+        self.assertFalse(self.execution_marker.exists(), "the tampered cache was executed")
+        self.assertNotIn("tampered", python.stdout)
+        self.assertTrue(json.loads(python.stdout)["systemMessage"].startswith(self.NOTICE_START))
+        self.notice_state().unlink()
+        silent = self.run_notice(extra_env={"PATH": self.python_free_path()})
+        self.assertFalse(self.execution_marker.exists(), "the tampered cache was executed")
+        self.assert_silent(silent)
 
     # --- explicit non-provisioning commands
 

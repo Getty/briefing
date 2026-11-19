@@ -7,6 +7,10 @@
 #   2. else that binary, downloaded only by the SessionStart hook (`hook session-start`; curl,
 #      else wget) - never by --version, --help, doctor or any other command, checked against the checksum pinned in the plugin (Linux `sha256sum`, macOS `openssl dgst -sha256`), then cached;
 #   3. else the plugin's own fallback, which is the previous behaviour, never unbriefed:
+#        hook marketplace-notice
+#                       the Python notice, hooks/briefing-marketplace-notice, else nothing at
+#                       all with exit 0: a courtesy note must not become step 4's warning at
+#                       every session start;
 #        hook EVENT     the Python hook, hooks/briefing-preload, with this process's stdin;
 #        doctor [...]   the Python doctor, hooks/briefing-preload doctor ...;
 #        anything else (--version, --help, notice, doctor --tsv, ...): the plugin's Perl
@@ -14,8 +18,8 @@
 #        App::Briefing - a system perl normally lacks Moo, Path::Tiny, JSON::MaybeXS and
 #        TOML::Tiny, so Perl is no fallback for hooks: a hook must never pay for probing
 #        it, and an unloadable Perl would leave the spawn unbriefed;
-#   4. else one line saying why: on stderr with exit 1; for `hook ...` the hook's one
-#      warning line on stdout instead, with exit 0 (a hook never fails).
+#   4. else one line saying why: on stderr with exit 1; for `hook ...` (but the notice) the
+#      hook's one warning line on stdout instead, with exit 0 (a hook never fails).
 # An engine it starts is exec'd with this process's arguments, stdin and stdout untouched.
 # The Python hook decides from the payload's hook_event_name, so the EVENT word is not
 # passed on; the binary takes it.
@@ -775,7 +779,8 @@ drop_download() {
   if [ -n "$drop_reason" ]; then why_binary=$drop_reason; fi
 }
 
-# Step 3, hooks and the doctor: the Python reference, which needs nothing but python3.
+# Step 3, hooks and the doctor: the Python script $1 (relative to the plugin root), which needs
+# nothing but python3.
 find_python() {
   if command -v python3 >/dev/null 2>&1; then python=python3
   elif command -v python >/dev/null 2>&1; then python=python
@@ -783,8 +788,8 @@ find_python() {
     why_python="python3 was not found on PATH"
     return 1
   fi
-  if [ ! -f "$root/hooks/briefing-preload" ]; then
-    why_python="hooks/briefing-preload is missing"
+  if [ ! -f "$root/$1" ]; then
+    why_python="$1 is missing"
     return 1
   fi
   return 0
@@ -815,13 +820,21 @@ why_python=
 why_perl=
 case ${1-} in
   hook)
-    if find_python; then exec "$python" "$root/hooks/briefing-preload"; fi
+    if [ "${2-}" = marketplace-notice ]; then
+      if find_python hooks/briefing-marketplace-notice; then
+        exec "$python" "$root/hooks/briefing-marketplace-notice"
+      fi
+      exit 0
+    fi
+    if find_python hooks/briefing-preload; then exec "$python" "$root/hooks/briefing-preload"; fi
     why_other=$why_python
     ;;
   doctor)
     use_perl=
     for argument in "$@"; do [ "$argument" = --tsv ] && use_perl=yes; done
-    if [ -z "$use_perl" ] && find_python; then exec "$python" "$root/hooks/briefing-preload" "$@"; fi
+    if [ -z "$use_perl" ] && find_python hooks/briefing-preload; then
+      exec "$python" "$root/hooks/briefing-preload" "$@"
+    fi
     if find_perl; then exec perl -I"$root/lib" "$root/script/briefing" "$@"; fi
     why_other="$why_python; $why_perl"
     ;;

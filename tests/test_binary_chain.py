@@ -295,16 +295,19 @@ class ChainTests(unittest.TestCase):
             env["LC_ALL"] = "C"
         return env
 
-    def run_entry(self, args, config, payload=None, cwd=None, server=None, timeout=180):
+    def run_entry(self, args, config, payload=None, cwd=None, server=None, timeout=180,
+                  extra_env=None):
         if isinstance(payload, str):
             payload = payload.encode("utf-8")
+        env = self.environment(config, server=server)
+        env.update(extra_env or {})
         return subprocess.run(
             [str(self.entry)] + list(args),
             input=payload if payload is not None else b"",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=str(cwd or self.project),
-            env=self.environment(config, server=server),
+            env=env,
             timeout=timeout,
         )
 
@@ -567,6 +570,53 @@ class ChainTests(unittest.TestCase):
         self.assertEqual(unknown.returncode, 2, unknown.stderr.decode("utf-8", "replace"))
         self.assertEqual(unknown.stdout, b"")
         self.assertNotEqual(unknown.stderr.strip(), b"", "the error text did not reach stderr")
+
+    def test_6b_marketplace_notice_shows_once_then_silence_without_perl_or_python(self):
+        # k20: the SessionStart notice is `hook marketplace-notice` of the provisioned binary.
+        # PATH holds neither Perl nor Python (setUpClass), so only the binary can print it.
+        config = self.new_config()
+        self.provision(config)
+        requests = len(self.server.paths)
+        home = self.root / ("Heim-Hinweis-ä-世界-" + self._testMethodName)
+        (home / ".claude").mkdir(parents=True, exist_ok=True)
+        cache = home / ".claude" / "plugins" / "cache"
+        windows_home = {"USERPROFILE": str(home)} if IS_WINDOWS else {}
+
+        def notice(marketplace):
+            root = cache / marketplace / "briefing" / "0.1.0"
+            return self.run_entry(
+                ("hook", "marketplace-notice"), config,
+                self.payload("SessionStart", source="startup"),
+                extra_env=dict(HOME=str(home), CLAUDE_PLUGIN_ROOT=str(root), **windows_home),
+            )
+
+        def assert_silent(result):
+            self.assertEqual(
+                (result.stdout, result.stderr, result.returncode), (b"", b"", 0),
+                result.stdout.decode("utf-8", "replace") + result.stderr.decode("utf-8", "replace"),
+            )
+
+        assert_silent(notice("getty"))
+        state = home / ".claude" / ".briefing-marketplace-notice"
+        self.assertFalse(state.exists(), "the getty marketplace left a notice state")
+
+        first = notice("briefing")
+        detail = "exit=%r\nstdout:\n%s\nstderr:\n%s" % (
+            first.returncode, first.stdout.decode("utf-8", "replace"),
+            first.stderr.decode("utf-8", "replace"))
+        self.assertEqual(first.returncode, 0, detail)
+        self.assertEqual(first.stderr, b"", detail)
+        self.assertEqual(len(first.stdout.splitlines()), 1, detail)
+        output = json.loads(first.stdout.decode("utf-8"))
+        self.assertEqual(set(output), {"systemMessage"}, detail)
+        self.assertTrue(output["systemMessage"].startswith(
+            "briefing is now also in the shared Getty marketplace"), detail)
+        self.assertIn("/plugin install briefing@getty", output["systemMessage"])
+        self.assertNotIn("no binary", output["systemMessage"], detail)
+        self.assertTrue(state.is_file(), "the notice recorded nothing")
+
+        assert_silent(notice("briefing"))
+        self.assertEqual(len(self.server.paths), requests, "the notice used the network")
 
     def test_7_tampered_binary_is_never_run(self):
         config = self.new_config()

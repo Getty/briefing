@@ -9,9 +9,10 @@
 # shared marketplace, loaded via --plugin-dir or a checkout, or the note has
 # already been shown once.
 #
-# On Windows, Claude Code starts briefing-marketplace-notice.exe (winlaunch)
-# next to this file, which picks a Python and runs this script:
-# winlaunch: run python {self}
+# Both hook files start it through the starter, `bin/briefing hook marketplace-notice`:
+# the verified release binary when it is cached, else this script with a Python found
+# on PATH (on Windows by bin/briefing-bootstrap.exe, with winlaunch's rule), else
+# nothing at all.
 
 import json
 import os

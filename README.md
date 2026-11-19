@@ -132,6 +132,7 @@ briefing hook                         # JSON hook payload on stdin
 briefing doctor --cwd . --harness both
 briefing doctor --tsv --cwd .         # tab-separated findings for tools (WHAT, ok|missing|warn, NAME, TEXT)
 briefing notice
+briefing hook marketplace-notice      # the same notice, as the plugin's SessionStart hook
 briefing --help
 briefing --version
 ```
@@ -208,7 +209,9 @@ pinned.
   including `doctor --tsv`, run the plugin's Perl source, but only if the
   machine's `perl` already loads `App::Briefing`. With neither, a hook answers
   with a single `systemMessage` warning and exits 0, and other commands fail
-  with that message.
+  with that message. The one-time marketplace notice falls back only to its
+  Python script, `hooks/briefing-marketplace-notice`, and without a Python it
+  stays silent.
 
 ## Declaring skills
 
@@ -306,11 +309,10 @@ described under [Standalone binary](#standalone-binary). Until a release pins
 the binary, and whenever it is unavailable, that launcher falls back to Python
 for hooks and `doctor`: `python3.exe`, else `python.exe`, else `py.exe -3` on
 `PATH`, in UTF-8 mode; the Microsoft Store stubs in `WindowsApps` do not count.
-Git Bash is not needed. The other hook
-scripts have a small `.exe` next to them (`winlaunch/`), which Claude Code
-starts on Windows and which runs the script with a Python found as `python3`,
-`python` or the `py` launcher; it also makes `briefing-doctor` work from
-PowerShell and cmd.
+Git Bash is not needed. `hooks/briefing-preload` and `bin/briefing-doctor`
+have a small `.exe` next to them (`winlaunch/`), which runs the script with a
+Python found as `python3`, `python` or the `py` launcher; it makes
+`briefing-doctor` work from PowerShell and cmd.
 
 **Codex**, from the shared marketplace — the only route there:
 

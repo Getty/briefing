@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/briefing-marketplace-notice"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/briefing hook marketplace-notice"
           },
           {
             "type": "command",

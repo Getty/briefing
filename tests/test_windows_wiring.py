@@ -85,25 +85,30 @@ class WindowsWiring(unittest.TestCase):
         self.assertNotEqual(bootstrap.read_bytes(), winlaunch.read_bytes())
 
     def test_claude_and_codex_commands_route_through_bin_briefing(self):
+        # k20 changed the earlier claim "each event reaches bin/briefing at most once":
+        # SessionStart now reaches it twice, the marketplace notice first and the
+        # session-start hook second. Every other event still reaches it exactly once.
         expected = {
             "claude": {
-                "PreToolUse": ("hook", "pre-tool-use"),
-                "SubagentStart": ("hook", "subagent-start"),
-                "SessionStart": ("hook", "session-start"),
+                "PreToolUse": [("hook", "pre-tool-use")],
+                "SubagentStart": [("hook", "subagent-start")],
+                "SessionStart": [("hook", "marketplace-notice"), ("hook", "session-start")],
             },
             "codex": {
-                "SubagentStart": ("hook", "subagent-start"),
-                "SessionStart": ("hook", "session-start"),
+                "SubagentStart": [("hook", "subagent-start")],
+                "SessionStart": [("hook", "marketplace-notice"), ("hook", "session-start")],
             },
         }
 
         for harness, events in expected.items():
             found = {}
             for _, event, hook in entries(harness):
+                # No entry may start the Python notice script (or its launcher) directly.
+                with self.subTest(harness=harness, event=event, command=hook["command"]):
+                    self.assertNotIn("briefing-marketplace-notice", hook["command"])
+                    self.assertNotIn("briefing-marketplace-notice", " ".join(hook.get("args", [])))
                 if command_path(hook) != "bin/briefing":
                     continue
-                with self.subTest(harness=harness, event=event):
-                    self.assertNotIn(event, found)
                 if harness == "claude":
                     self.assertEqual(hook["command"], PREFIX + "bin/briefing")
                     invocation = tuple(hook["args"])
@@ -112,8 +117,12 @@ class WindowsWiring(unittest.TestCase):
                     self.assertEqual(words[0], PREFIX + "bin/briefing")
                     self.assertNotIn("args", hook)
                     invocation = tuple(words[1:])
-                found[event] = invocation
+                found.setdefault(event, []).append(invocation)
             self.assertEqual(found, events)
+
+    def test_no_launcher_remains_for_the_python_notice_script(self):
+        self.assertTrue((REPO_ROOT / "hooks" / "briefing-marketplace-notice").is_file())
+        self.assertFalse((REPO_ROOT / "hooks" / "briefing-marketplace-notice.exe").exists())
 
     def test_doctor_is_a_script_not_a_symlink(self):
         # A symlink becomes a text file holding its target in a Windows

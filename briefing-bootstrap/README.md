@@ -48,7 +48,9 @@ along `PATH` in order, skipping every directory whose path contains
 the hook reads its JSON payload as UTF-8. Other commands run the plugin's Perl
 source when `perl.exe` loads `App::Briefing`; with neither, a hook prints one
 `systemMessage` warning and exits 0, and other commands report the reason and
-fail.
+fail. `hook marketplace-notice` is the exception: its only fallback is
+`hooks/briefing-marketplace-notice` with that Python, and without one it exits 0
+with no output.
 
 Test-only overrides (a fixture child, plain HTTP to a loopback host as the base
 URL, a size limit, synchronization points) are honored only when
@@ -91,7 +93,7 @@ python -m unittest tests.test_windows_wiring -v
 python tests/test_briefing_bootstrap.py C:\absolute\path\to\briefing-bootstrap.exe
 ```
 
-The native suite (39 contracts in `tests/test_briefing_bootstrap.py`) covers
+The native suite (46 contracts in `tests/test_briefing_bootstrap.py`) covers
 Unicode paths and arguments, Windows quoting, inherited UTF-8 standard streams, environment and current-directory preservation,
 versioned `PAR_GLOBAL_TEMP`, relative-config rejection, and exact child exit
 status.
