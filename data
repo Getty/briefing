@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-19T06:21:15Z
+id: 24
+priority: low
+status: backlog
+tags:
+- binary
+title: 'Binary: a local pp build packed Moose, Specio, Perl::Tidy into the PAR tree'
+updated: 2026-11-19T06:21:15Z
+---
+
+Observed by the k18 worker (2026-11-19): a local binary build at 7044aef extracted about 1650 entries, the deepest relative path 82 characters, including Moose exception classes, Specio and Perl::Tidy. The 0.001 CI probe had a deepest path of 45 characters, so this may be specific to the local build environment (scripts/loaded-modules.pl, scripts/binary-pp-args.sh). Matters for binary size, start-up cost and the PAR_TREE_RESERVE on Windows (128 since k18). Done when it is clear which run pulls these modules in, and the pp arguments pack only what the CLI loads, or a written note that the local build differs from CI on purpose.
