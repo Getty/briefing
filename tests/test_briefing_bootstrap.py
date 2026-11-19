@@ -3089,14 +3089,21 @@ class BootstrapProcessTests(unittest.TestCase):
                 self.started_programs(log),
                 [(canonical_path(str(python.resolve())), canonical_args([self.notice_script()]))],
             )
+        # The fixture touches the marker on every start, and the Python fallback
+        # stub is the same fixture: after the python run the marker proves
+        # nothing. There the invocation log is the proof (exactly one python.exe
+        # record; a started cache would record itself). The marker is judged only
+        # in the run without any Python on PATH.
+        if self.marker.exists():
+            self.marker.unlink()
         with self.subTest(runtime="none"):
             result = self.run_notice(
                 self.empty_path, testing=True, base_url=server.base_url, marker=self.marker,
             )
             self.assert_silent_success(result)
+            self.assertFalse(self.marker.exists(), "the notice started the fixture binary")
         self.assertEqual(server.paths, [], "the notice made an HTTP request")
         self.assert_no_trusted_cache_entry(sha256(data))
-        self.assertFalse(self.marker.exists(), "the notice started the fixture binary")
 
     def test_notice_with_a_verified_cache_runs_the_binary_with_exactly_the_hook_words(self):
         digest, server = self.provision_cached_fixture()
@@ -3134,9 +3141,13 @@ class BootstrapProcessTests(unittest.TestCase):
                 self.started_programs(log),
                 [(canonical_path(str(python.resolve())), canonical_args([self.notice_script()]))],
             )
+        # The python run's fallback stub is the fixture and touches the marker
+        # itself; judge the marker only in the run without Python on PATH.
+        if self.marker.exists():
+            self.marker.unlink()
         with self.subTest(runtime="none"):
             self.assert_silent_success(self.run_notice(self.empty_path, marker=self.marker))
-        self.assertFalse(self.marker.exists(), "the tampered cache was executed")
+            self.assertFalse(self.marker.exists(), "the tampered cache was executed")
         self.assertEqual(len(server.paths), requests, "the notice repaired the cache")
 
 
