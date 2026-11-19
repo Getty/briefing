@@ -10,6 +10,7 @@ requires 'Path::Tiny';
 requires 'TOML::Tiny::Parser', '0.22';
 
 if ($^O eq 'MSWin32') {
+  requires 'Win32';
   requires 'Win32::LongPath';
 }
 

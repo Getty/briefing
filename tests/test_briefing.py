@@ -13,8 +13,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from cli_driver import (assert_skill_dir, command_for,
-                        known_failure_on_windows_perl_cli)
+from cli_driver import assert_skill_dir, command_for
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "briefing-preload"
@@ -375,8 +374,6 @@ class BriefingHookTests(unittest.TestCase):
         self.assertIn("PROJECT FOO", prompt)
         self.assertNotIn("USER FOO", prompt)
 
-    @known_failure_on_windows_perl_cli(
-        "k14", "the Perl CLI loses a non-ANSI HOME on Windows; outside the k7 design")
     def test_user_skill_resolves_from_unicode_home(self):
         unicode_home = self.root / "home-ä-技能"
         unicode_home.mkdir()
@@ -391,7 +388,7 @@ class BriefingHookTests(unittest.TestCase):
         prompt = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
         skill_dir = os.path.abspath(unicode_home / ".claude/skills/user-skill")
         self.assertIn("UNICODE HOME USER BODY", prompt)
-        self.assertIn('<skill name="user-skill" dir="%s">' % skill_dir, prompt)
+        assert_skill_dir(self, prompt, "user-skill", skill_dir)
 
     def test_user_beats_plugin(self):
         self._declare("foo")

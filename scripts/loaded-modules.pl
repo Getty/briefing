@@ -84,7 +84,7 @@ for my $run (@runs) {
 my @named = qw(
   B Carp Encode JSON::MaybeXS JSON::PP Moo namespace::clean Path::Tiny TOML::Tiny::Parser
 );
-push @named, 'Win32::LongPath' if $^O eq 'MSWin32';
+push @named, 'Win32', 'Win32::LongPath' if $^O eq 'MSWin32';
 for my $module ( @named, qw( Cpanel::JSON::XS JSON::XS ) ) {
   ( my $file = "$module.pm" ) =~ s{::}{/}g;
   eval { require $file; 1 };

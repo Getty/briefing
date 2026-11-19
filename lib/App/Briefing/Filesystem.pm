@@ -5,6 +5,7 @@ use Moo;
 use Encode qw( FB_CROAK decode encode );
 use Path::Tiny qw( path );
 use utf8 ();
+use if $^O eq 'MSWin32', 'Win32';
 use if $^O eq 'MSWin32', 'Win32::LongPath';
 use namespace::clean;
 
@@ -19,6 +20,47 @@ sub decode_path {
 
   my $decoded = eval { decode( 'UTF-8', $value, FB_CROAK ) };
   return $@ ? $value : $decoded;
+}
+
+sub environment_value {
+  my ( $self, $name ) = @_;
+  my $value = $ENV{$name};
+  return unless defined $value && length $value;
+
+  if ($self->is_windows) {
+    my $wide = $self->_wide_environment_value($name);
+    return $wide if defined $wide && length $wide;
+  }
+  return $self->decode_path($value);
+}
+
+=method environment_value
+
+    my $home = $filesystem->environment_value('HOME');
+
+Returns the environment variable as a character string, or undef when it is
+unset or empty. On Windows the value comes from the process's wide environment,
+so characters outside the ANSI code page, which C<%ENV> has already replaced,
+arrive intact. Elsewhere, and on Windows when the wide read yields nothing, the
+C<%ENV> bytes are decoded as UTF-8 and kept as they are when they are not.
+
+=cut
+
+sub _wide_environment_value {
+  my ( $self, $name ) = @_;
+  # Win32::ExpandEnvironmentStrings expands against the wide environment and
+  # returns ANSI code page bytes when every character fits that code page, a
+  # UTF-8 character string otherwise (wstr_to_sv in Win32.xs, Win32 0.59). The
+  # leading noncharacter U+FFFF fits no ANSI code page, so a usable result is
+  # always the character string. An unset variable stays unexpanded; under the
+  # UTF-8 code page 65001 the result is undef or bytes, and %ENV, which holds
+  # UTF-8 there, is used instead.
+  my $reference = "\x{FFFF}".'%'.$name.'%';
+  my $expanded = Win32::ExpandEnvironmentStrings($reference);
+  return unless defined $expanded && utf8::is_utf8($expanded);
+  return if $expanded eq $reference;
+  return unless $expanded =~ s/\A\x{FFFF}//;
+  return $expanded;
 }
 
 sub _native_path {

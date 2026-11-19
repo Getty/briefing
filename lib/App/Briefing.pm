@@ -56,42 +56,35 @@ sub _build_filesystem {
   return $self->filesystem_class->new;
 }
 
-sub _environment_path {
-  my ( $self, $value ) = @_;
-  return $self->filesystem->decode_path($value);
-}
-
 sub _build_cwd {
   my ( $self ) = @_;
-  return $self->_environment_path( $ENV{PWD} )
-    if defined $ENV{PWD} && length $ENV{PWD};
+  my $pwd = $self->filesystem->environment_value('PWD');
+  return $pwd if defined $pwd;
   return $self->filesystem->current_dir;
 }
 
 sub _build_home {
   my ( $self ) = @_;
-  return $self->_environment_path( $ENV{HOME} )
-    if defined $ENV{HOME} && length $ENV{HOME};
+  my $value = $self->filesystem->environment_value('HOME');
+  return $value if defined $value;
 
   if ($self->filesystem->is_windows) {
-    return $self->_environment_path( $ENV{USERPROFILE} )
-      if defined $ENV{USERPROFILE} && length $ENV{USERPROFILE};
-    return $self->_environment_path( $ENV{HOMEDRIVE}.$ENV{HOMEPATH} )
-      if defined $ENV{HOMEDRIVE}
-      && length $ENV{HOMEDRIVE}
-      && defined $ENV{HOMEPATH}
-      && length $ENV{HOMEPATH};
+    $value = $self->filesystem->environment_value('USERPROFILE');
+    return $value if defined $value;
+    my $drive = $self->filesystem->environment_value('HOMEDRIVE');
+    my $path  = $self->filesystem->environment_value('HOMEPATH');
+    return $drive.$path if defined $drive && defined $path;
   }
 
   my $home = (getpwuid $<)[7];
-  return $self->_environment_path($home) if defined $home && length $home;
+  return $self->filesystem->decode_path($home) if defined $home && length $home;
   return $self->filesystem->current_dir;
 }
 
 sub _build_codex_home {
   my ( $self ) = @_;
-  return $self->_environment_path( $ENV{CODEX_HOME} )
-    if defined $ENV{CODEX_HOME} && length $ENV{CODEX_HOME};
+  my $codex_home = $self->filesystem->environment_value('CODEX_HOME');
+  return $codex_home if defined $codex_home;
   return $self->filesystem->join_path( $self->home, '.codex' );
 }
 
@@ -1149,9 +1142,8 @@ replaces the payload's C<hook_event_name> for routing.
 
 sub _installed_marketplace {
   my ( $self ) = @_;
-  my $root = $ENV{CLAUDE_PLUGIN_ROOT};
-  return unless defined $root && length $root;
-  $root = $self->_environment_path($root);
+  my $root = $self->filesystem->environment_value('CLAUDE_PLUGIN_ROOT');
+  return unless defined $root;
   $root =~ tr{\\}{/};
   my @parts = split m{/+}, $root;
   for my $index (0 .. $#parts) {

@@ -48,6 +48,10 @@ Revision history for briefing
     page by changing into it, not through `briefing doctor --cwd`; Perl
     receives command-line arguments in the ANSI code page there. Hook payloads
     are UTF-8 and not affected.
+  - Windows: a home directory or working directory outside the ANSI code page
+    no longer loses user-level skills. The Perl CLI reads HOME, USERPROFILE,
+    HOMEDRIVE/HOMEPATH, CODEX_HOME, PWD and CLAUDE_PLUGIN_ROOT through the wide
+    environment (Win32 is now required on Windows) (k14).
 
 0.5.3     2026-10-06 05:22:17Z
   - Windows: briefing runs without Git Bash. Each hook script has a small
