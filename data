@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T08:52:48Z
+id: 29
+priority: low
+status: backlog
+tags:
+- starter
+- cli
+title: 'Starter: doctor --tsv no-fallback message starts with ''; '''
+updated: 2026-11-19T08:52:48Z
+---
+
+Found in k23 review (HEAD 40c7bb3). For doctor --tsv the starter skips the Python lookup, so why_python stays empty and bin/briefing:839 joins it with why_perl: the message reads 'no fallback (; ...)'. Done when the message names only the reasons that apply, with a starter test.
