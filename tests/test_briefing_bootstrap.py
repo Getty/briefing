@@ -38,6 +38,9 @@ STUB_SOURCE = REPO_ROOT / "tests" / "fixtures" / "briefing-bootstrap-stub.c"
 EXPLICIT_BOOTSTRAP = None
 IS_WINDOWS = os.name == "nt"
 VERSION = "0.001"
+# The pin directory of the gated fixture child: the 16 lowercase hex digits the bootstrap
+# requires between the version directory and the file.
+FIXTURE_PIN = "0123456789abcdef"
 ASSETS = (
     "briefing-0.001-linux-x86_64",
     "briefing-0.001-linux-arm64",
@@ -998,9 +1001,11 @@ class BootstrapProcessTests(unittest.TestCase):
         self.case_root = self.root / self._testMethodName
         self.case_root.mkdir()
         self.config = self.case_root / "Konfiguration-ä-世界"
+        # self.cache is the version directory; the binary and the fixture child live one level
+        # deeper, in the pin directory <V>\\<16 hex>.
         self.cache = self.config / "briefing" / "bin" / VERSION
-        self.cache.mkdir(parents=True)
-        self.child = self.cache / "briefing-bootstrap-stub.exe"
+        (self.cache / FIXTURE_PIN).mkdir(parents=True)
+        self.child = self.cache / FIXTURE_PIN / "briefing-bootstrap-stub.exe"
         shutil.copyfile(self.fixture, self.child)
         self.marker = self.case_root / "native-child-started"
         self.empty_path = self.case_root / "empty-path"
@@ -1074,8 +1079,7 @@ class BootstrapProcessTests(unittest.TestCase):
     def cached_path(self, data=None, digest=None, version=VERSION):
         if digest is None:
             digest = sha256(data if data is not None else self.fixture.read_bytes())
-        asset = WINDOWS_ASSET.replace(VERSION, version, 1)
-        return self.config / "briefing" / "bin" / version / (asset + "-" + digest)
+        return self.config / "briefing" / "bin" / version / digest[:16] / "briefing.exe"
 
     def put_cached_fixture(self, data=None, digest=None):
         payload = data if data is not None else self.fixture.read_bytes()
@@ -1234,7 +1238,7 @@ class BootstrapProcessTests(unittest.TestCase):
         self.assertEqual(result.stdout, b"")
         self.assertEqual(result.stderr, b"")
         cached = self.cached_path(digest=digest)
-        par = Path(str(cached) + ".par")
+        par = cached.parent / "par"
         child_directory = par / "fixture-child-directory"
         child_file = child_directory / "fixture-child-file"
         self.assertTrue(child_file.is_file(), "fixture did not create the PAR child tree")
@@ -1323,7 +1327,7 @@ class BootstrapProcessTests(unittest.TestCase):
         self.assertEqual(second.stderr, b"")
         self.assertEqual(first.stdout, second.stdout, "PAR path must be stable")
         par = Path(first.stdout.decode("utf-8"))
-        expected = Path(str(self.child.resolve()) + ".par")
+        expected = self.child.resolve().parent / "par"
         self.assertEqual(
             canonical_path(str(par)),
             canonical_path(str(expected)),
@@ -1332,6 +1336,178 @@ class BootstrapProcessTests(unittest.TestCase):
             Path(canonical_path(self.config.resolve())))
         self.assertEqual(relative.parts[:2], ("briefing", "bin"))
         self.assertRegex(relative.parts[2], re.compile(r"^[0-9][A-Za-z0-9._+-]*$"))
+        self.assertEqual(relative.parts[2], VERSION)
+        self.assertEqual(relative.parts[3:], (FIXTURE_PIN, "par"))
+
+    def short_ascii_config(self):
+        """A short ASCII configuration root outside %TEMP%.
+
+        %TEMP% is itself an 8.3 alias on CI runners, so a root below it would hand the child an
+        alias for reasons unrelated to the cache layout. The system drive root or RUNNER_TEMP
+        keeps the whole cache path plain, ASCII and far below MAX_PATH.
+        """
+        base = os.environ.get("RUNNER_TEMP") or (os.environ.get("SystemDrive", "C:") + "\\")
+        try:
+            root = Path(tempfile.mkdtemp(prefix="bc", dir=base))
+        except OSError as error:
+            self.skipTest("no writable short ASCII root (%s): %s" % (base, error))
+        self.addCleanup(scrub_tree, root)
+        if "~" in str(root) or not str(root).isascii() or len(str(root)) > 40:
+            self.skipTest("the short ASCII root is not short and plain: %s" % root)
+        return root
+
+    def provision_under_short_config(self, label):
+        """Provision the stub into a short ASCII config; return (expected binary path, digest, child invocation records)."""
+        self.config = self.short_ascii_config()
+        self.marker = self.case_root / (label + "-child-started")
+        data = self.fixture.read_bytes()
+        digest = sha256(data)
+        self.write_manifest(self.canonical_manifest(data=data))
+        server = AssetServer(self, data=data)
+        log = self.case_root / (label + "-invocations.bin")
+        result = self.run_bootstrap(
+            ("hook", "session-start"),
+            env=self.bootstrap_environment(
+                testing=True,
+                base_url=server.base_url,
+                marker=self.marker,
+                mode="record",
+                BRIEFING_BOOTSTRAP_STUB_LOG=str(log.absolute()),
+            ),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
+        self.assertTrue(self.marker.exists(), "the provisioned stub did not run")
+        # Exactly this spelling, character for character: <config>\briefing\bin\<V>\<pin>\
+        # briefing.exe. The drive letter's case is the one spelling the bootstrap may normalize.
+        expected = "%s\\briefing\\bin\\%s\\%s\\briefing.exe" % (
+            self.config, VERSION, digest[:16])
+        return expected, digest, self.invocation_records(log)
+
+    def assert_plain_path(self, expected, actual):
+        self.assertNotIn("~", actual, "the child got an 8.3 alias: " + actual)
+        self.assertEqual(actual[1:], expected[1:], "not the plain long cache path")
+        self.assertEqual(actual[:1].lower(), expected[:1].lower())
+
+    def assert_provisioning_records(self, expected, records):
+        """Provisioning starts exactly two children, both in the pin directory.
+
+        First the `--version` warm-up of the temporary download (it inherits the record mode
+        and the log), then the real run. The warm-up's program name is the longest one and so
+        sets the interpreter reserve; it must be plain too.
+        """
+        self.assertEqual(len(records), 2, records)
+        pin_directory = expected[: -len("briefing.exe")]
+        warm_up, real = records
+        self.assertEqual(warm_up[1:], ["--version"])
+        name = warm_up[0][len(pin_directory):]
+        self.assertNotIn("~", warm_up[0], "the warm-up got an 8.3 alias: " + warm_up[0])
+        self.assertEqual(warm_up[0][1:len(pin_directory)], pin_directory[1:],
+                         "the warm-up is not inside the plain pin directory")
+        self.assertEqual(warm_up[0][:1].lower(), pin_directory[:1].lower())
+        self.assertRegex(
+            name,
+            r"^\.briefing-%s-windows-x86_64\.exe\.[0-9]+\.[0-9]+\.[0-9]+\.tmp$"
+            % re.escape(VERSION),
+        )
+        self.assertEqual(real[1:], ["hook", "session-start"])
+        self.assert_plain_path(expected, real[0])
+
+    def assert_hit_records(self, expected, records):
+        """A cache hit starts the binary once and runs no warm-up."""
+        self.assertEqual(len(records), 1, records)
+        self.assertEqual(records[0][1:], ["hook", "subagent-start"])
+        self.assert_plain_path(expected, records[0][0])
+
+    def test_child_gets_the_plain_long_path_under_a_short_ascii_config(self):
+        expected, digest, records = self.provision_under_short_config("short-ascii")
+        self.assert_provisioning_records(expected, records)
+
+        # A cache hit hands over the same plain binary path and a PAR directory beside it.
+        hit_log = self.case_root / "short-ascii-hit-invocations.bin"
+        hit = self.run_bootstrap(
+            ("hook", "subagent-start"),
+            env=self.bootstrap_environment(
+                marker=self.marker,
+                mode="record",
+                BRIEFING_BOOTSTRAP_STUB_LOG=str(hit_log.absolute()),
+            ),
+        )
+        self.assertEqual(hit.returncode, 0, hit.stderr.decode("utf-8", "replace"))
+        self.assert_hit_records(expected, self.invocation_records(hit_log))
+
+        par_hit = self.run_bootstrap(
+            ("hook", "subagent-start"),
+            env=self.bootstrap_environment(marker=self.marker, mode="par"),
+        )
+        self.assertEqual(par_hit.returncode, 0, par_hit.stderr.decode("utf-8", "replace"))
+        par = par_hit.stdout.decode("utf-8")
+        expected_par = expected[: -len("briefing.exe")] + "par"
+        self.assertNotIn("~", par)
+        self.assertEqual(par[1:], expected_par[1:], "PAR_GLOBAL_TEMP is not the plain path")
+        self.assertEqual(par[:1].lower(), expected_par[:1].lower())
+
+    @unittest.skipUnless(
+        os.name == "nt" and __import__("ctypes").windll.shell32.IsUserAnAdmin(),
+        "needs an elevated token: fsutil 8dot3name strip is admin-only (the optional "
+        "proof that the cache starts without any 8.3 alias)",
+    )
+    def test_cache_hit_starts_after_the_8dot3_names_are_stripped(self):
+        expected, digest, records = self.provision_under_short_config("stripped")
+        self.assert_provisioning_records(expected, records)
+        import ctypes
+
+        def short_form(path):
+            buffer = ctypes.create_unicode_buffer(32768)
+            ctypes.windll.kernel32.GetShortPathNameW(str(path), buffer, 32768)
+            return buffer.value
+
+        # Record whether the strip has anything to remove: the short form differs from the
+        # long form only while an 8.3 alias exists. The CI log then shows what was tested.
+        below = len(Path(str(self.config)).parts)
+        before_pin = Path(expected).parent
+        had_alias = Path(short_form(before_pin)).parts[below:] != before_pin.parts[below:]
+        sys.stderr.write(
+            "8dot3 strip: pin directory had an 8.3 alias before the strip: %s\n"
+            % ("yes" if had_alias else "no (volume generates none; the strip proves nothing new)")
+        )
+        try:
+            strip = subprocess.run(
+                ["fsutil", "8dot3name", "strip", "/s", "/f", str(self.config)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            self.skipTest("fsutil 8dot3name strip did not finish within 120 s on this runner")
+        if strip.returncode != 0:
+            self.skipTest(
+                "fsutil could not strip 8.3 names on this volume: "
+                + strip.stdout.decode("utf-8", "replace")
+            )
+        # fsutil strips the names inside the config directory, not the config directory's own
+        # name or its ancestors, so only the components below it are compared. On a volume
+        # that already generates no 8.3 names the short form equals the long form and the
+        # same assertion holds.
+        pin_directory = Path(expected).parent
+        short = short_form(pin_directory)
+        self.assertTrue(short)
+        self.assertEqual(
+            Path(short).parts[below:],
+            pin_directory.parts[below:],
+            "the cache path below the config directory still has an 8.3 alias",
+        )
+
+        log = self.case_root / "stripped-hit-invocations.bin"
+        hit = self.run_bootstrap(
+            ("hook", "subagent-start"),
+            env=self.bootstrap_environment(
+                marker=self.marker,
+                mode="record",
+                BRIEFING_BOOTSTRAP_STUB_LOG=str(log.absolute()),
+            ),
+        )
+        self.assertEqual(hit.returncode, 0, hit.stderr.decode("utf-8", "replace"))
+        self.assert_hit_records(expected, self.invocation_records(log))
 
     def test_malformed_extended_config_path_is_rejected_before_child_start(self):
         marker = self.root / "malformed-extended-config-child-started"
@@ -1351,6 +1527,20 @@ class BootstrapProcessTests(unittest.TestCase):
         outside_child = self.root / "outside-cache-bootstrap-stub.exe"
         shutil.copyfile(self.child, relative_child)
         shutil.copyfile(self.child, outside_child)
+        # A child must sit in <V>\\<exactly 16 lowercase hex digits>\\<file>.
+        misplaced = {
+            "directly-in-version-directory": self.cache,
+            "uppercase-pin-directory": self.cache / "FEDCBA9876543210",
+            "short-pin-directory": self.cache / FIXTURE_PIN[:15],
+            "long-pin-directory": self.cache / (FIXTURE_PIN + "0"),
+            "non-hex-pin-directory": self.cache / (FIXTURE_PIN[:15] + "g"),
+            "two-levels-below-version": self.cache / FIXTURE_PIN / "nested",
+        }
+        misplaced_children = {}
+        for name, directory in misplaced.items():
+            directory.mkdir(parents=True, exist_ok=True)
+            misplaced_children[name] = directory / ("misplaced-" + name + ".exe")
+            shutil.copyfile(self.child, misplaced_children[name])
 
         cases = (
             ("missing-gate", None, str(self.child.resolve())),
@@ -1359,6 +1549,8 @@ class BootstrapProcessTests(unittest.TestCase):
             ("wrong-gate-numeric", "01", str(self.child.resolve())),
             ("relative-child", "1", relative_child.name),
             ("outside-versioned-cache", "1", str(outside_child.resolve())),
+        ) + tuple(
+            (name, "1", str(child.resolve())) for name, child in misplaced_children.items()
         )
         for name, gate, child in cases:
             with self.subTest(case=name):
@@ -1444,7 +1636,7 @@ class BootstrapProcessTests(unittest.TestCase):
         )
         self.assertTrue(self.marker.exists(), "canonical setup bytes did not execute")
         self.marker.unlink()
-        extensionless = self.cache / ("briefing-0.001-windows-x86_64-" + digest)
+        extensionless = self.cached_path(digest=digest).with_name("briefing")
         extensionless.write_bytes(data)
 
         for name, manifest in cases.items():
@@ -1579,6 +1771,7 @@ class BootstrapProcessTests(unittest.TestCase):
             ("briefing", ("briefing",)),
             ("bin", ("briefing", "bin")),
             ("version", ("briefing", "bin", VERSION)),
+            ("pin", ("briefing", "bin", VERSION, sha256(data)[:16])),
         )
 
         for name, parts in cases:
@@ -1643,7 +1836,7 @@ class BootstrapProcessTests(unittest.TestCase):
         if reached_window:
             try:
                 temporary_files = [
-                    path for path in self.cache.iterdir()
+                    path for path in self.cached_path(digest=digest).parent.iterdir()
                     if path.is_file() and path.name.endswith(".tmp")
                 ]
                 if len(temporary_files) != 1:
@@ -1656,12 +1849,13 @@ class BootstrapProcessTests(unittest.TestCase):
                 foreign_version = (
                     foreign_anchor / "config" / "briefing" / "bin" / VERSION
                 )
-                foreign_version.mkdir(parents=True)
-                foreign_temporary = foreign_version / original_temporary.name
+                foreign_pin = foreign_version / destination.parent.name
+                foreign_pin.mkdir(parents=True)
+                foreign_temporary = foreign_pin / original_temporary.name
                 foreign_temporary.write_bytes(b"foreign temporary sentinel")
-                foreign_destination = foreign_version / destination.name
+                foreign_destination = foreign_pin / destination.name
                 foreign_destination.write_bytes(foreign_data)
-                foreign_par = Path(str(foreign_destination) + ".par")
+                foreign_par = foreign_pin / "par"
                 foreign_par.mkdir()
                 foreign_par_sentinel = foreign_par / "foreign-par-sentinel"
                 foreign_par_sentinel.write_bytes(b"foreign PAR sentinel")
@@ -1750,7 +1944,7 @@ class BootstrapProcessTests(unittest.TestCase):
         if reached:
             try:
                 temporary_files = [
-                    path for path in self.cache.iterdir()
+                    path for path in self.cached_path(digest=digest).parent.iterdir()
                     if path.is_file() and path.name.endswith(".tmp")
                 ]
                 if len(temporary_files) != 1:
@@ -1762,12 +1956,13 @@ class BootstrapProcessTests(unittest.TestCase):
                 foreign_version = (
                     foreign_anchor / "config" / "briefing" / "bin" / VERSION
                 )
-                foreign_version.mkdir(parents=True)
-                foreign_temp = foreign_version / temporary_files[0].name
+                foreign_pin = foreign_version / destination.parent.name
+                foreign_pin.mkdir(parents=True)
+                foreign_temp = foreign_pin / temporary_files[0].name
                 foreign_temp.write_bytes(foreign_data)
-                foreign_destination = foreign_version / destination.name
+                foreign_destination = foreign_pin / destination.name
                 foreign_destination.write_bytes(foreign_data)
-                foreign_par = Path(str(foreign_destination) + ".par")
+                foreign_par = foreign_pin / "par"
                 foreign_par.mkdir()
                 foreign_par_sentinel = foreign_par / "sentinel"
                 foreign_par_sentinel.write_bytes(b"foreign PAR sentinel")
@@ -1837,12 +2032,13 @@ class BootstrapProcessTests(unittest.TestCase):
                 foreign_version = (
                     foreign_anchor / "config" / "briefing" / "bin" / VERSION
                 )
-                foreign_version.mkdir(parents=True)
-                foreign_temp = foreign_version / ".foreign-temp-sentinel.tmp"
+                foreign_pin = foreign_version / destination.parent.name
+                foreign_pin.mkdir(parents=True)
+                foreign_temp = foreign_pin / ".foreign-temp-sentinel.tmp"
                 foreign_temp.write_bytes(b"foreign temp sentinel")
-                foreign_destination = foreign_version / destination.name
+                foreign_destination = foreign_pin / destination.name
                 foreign_destination.write_bytes(foreign_data)
-                foreign_par = Path(str(foreign_destination) + ".par")
+                foreign_par = foreign_pin / "par"
                 foreign_par.mkdir()
                 foreign_par_sentinel = foreign_par / "sentinel"
                 foreign_par_sentinel.write_bytes(b"foreign PAR sentinel")
@@ -1920,12 +2116,13 @@ class BootstrapProcessTests(unittest.TestCase):
                 foreign_version = (
                     foreign_anchor / "config" / "briefing" / "bin" / VERSION
                 )
-                foreign_version.mkdir(parents=True)
-                foreign_temp = foreign_version / ".foreign-temp-sentinel.tmp"
+                foreign_pin = foreign_version / destination.parent.name
+                foreign_pin.mkdir(parents=True)
+                foreign_temp = foreign_pin / ".foreign-temp-sentinel.tmp"
                 foreign_temp.write_bytes(b"foreign temp sentinel")
-                foreign_destination = foreign_version / destination.name
+                foreign_destination = foreign_pin / destination.name
                 foreign_destination.write_bytes(foreign_data)
-                foreign_par = Path(str(foreign_destination) + ".par")
+                foreign_par = foreign_pin / "par"
                 foreign_par.mkdir()
                 foreign_par_sentinel = foreign_par / "sentinel"
                 foreign_par_sentinel.write_bytes(b"foreign PAR sentinel")
@@ -2009,12 +2206,13 @@ class BootstrapProcessTests(unittest.TestCase):
                     / "bin"
                     / VERSION
                 )
-                foreign_version.mkdir(parents=True)
-                foreign_temp = foreign_version / ".foreign-temp-sentinel.tmp"
+                foreign_pin = foreign_version / destination.parent.name
+                foreign_pin.mkdir(parents=True)
+                foreign_temp = foreign_pin / ".foreign-temp-sentinel.tmp"
                 foreign_temp.write_bytes(b"foreign temp sentinel")
-                foreign_destination = foreign_version / destination.name
+                foreign_destination = foreign_pin / destination.name
                 foreign_destination.write_bytes(foreign_data)
-                foreign_par = Path(str(foreign_destination) + ".par")
+                foreign_par = foreign_pin / "par"
                 foreign_par.mkdir()
                 foreign_par_sentinel = foreign_par / "sentinel"
                 foreign_par_sentinel.write_bytes(b"foreign PAR sentinel")
@@ -2067,6 +2265,7 @@ class BootstrapProcessTests(unittest.TestCase):
             self.config / "briefing",
             self.config / "briefing" / "bin",
             self.cache,
+            cached.parent,
             cached,
         ):
             with self.subTest(path=str(path)):
@@ -2078,6 +2277,7 @@ class BootstrapProcessTests(unittest.TestCase):
             self.config / "briefing",
             self.config / "briefing" / "bin",
             self.cache,
+            cached.parent,
             cached,
             par,
             child_directory,

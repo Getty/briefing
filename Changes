@@ -52,6 +52,13 @@ Revision history for briefing
     no longer loses user-level skills. The Perl CLI reads HOME, USERPROFILE,
     HOMEDRIVE/HOMEPATH, CODEX_HOME, PWD and CLAUDE_PLUGIN_ROOT through the wide
     environment (Win32 is now required on Windows) (k14).
+  - Windows binary cache: the pinned binary now lives in
+    `<config>/briefing/bin/<version>/<first 16 hex of the pin>/briefing[.exe]`
+    with PAR's `par/` directory beside it, so PAR's loader gets the plain long
+    path for ordinary ASCII profiles instead of depending on 8.3 short names
+    (the short alias stays the path for non-ANSI profiles). The full hash stays
+    in the pin file and the binary is rehashed before every run; the PAR tree
+    reserve grew from 64 to 128 characters (k18).
 
 0.5.3     2026-10-06 05:22:17Z
   - Windows: briefing runs without Git Bash. Each hook script has a small

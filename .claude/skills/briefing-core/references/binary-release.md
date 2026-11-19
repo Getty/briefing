@@ -79,7 +79,9 @@ gh release download <V> -R Getty/briefing -p 'briefing-<V>-*' -D <dir>
 `sha256sum -c` line checks each published asset against its pin (macOS:
 `shasum -a 256 -c`). The pin file is the only place the release's hashes are
 trusted from. Neither the starter nor the bootstrap is rebuilt for a new
-version: both read `<V>` from the pin file.
+version: both read `<V>` from the pin file. The pin also names the cache
+directory (`<V>/<first 16 hex>/`), so a changed pin for the same `<V>`
+provisions into a new directory.
 
 ## 5. Commit and ship
 

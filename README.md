@@ -191,11 +191,14 @@ pinned.
   release's own `SHA256SUMS` is never trusted at run time. Repository and
   release permissions are the trust root; there are no signatures or
   attestations.
-- **Cache:** `<config>/briefing/bin/<version>/`, where `<config>` is
+- **Cache:** `<config>/briefing/bin/<version>/<pin>/briefing` (`briefing.exe`
+  on Windows), where `<pin>` is the first 16 hex digits of the pinned SHA-256
+  (only a name: the full checksum is what gets checked) and `<config>` is
   `CLAUDE_CONFIG_DIR` (it must be an absolute path), else `~/.claude`
   (Windows: `%USERPROFILE%\.claude`). The cache is private to the user (mode
   0700; on Windows an access list for the current user only) and also holds
-  the binary's unpacked runtime. Old versions are not removed.
+  the binary's unpacked runtime in `par/` beside it. Old versions are not
+  removed.
 - **Tools:** Linux and macOS use only `sh`, `curl` or `wget`, and `sha256sum`
   (Linux) or `openssl` (macOS; not `shasum`, which needs Perl). Windows uses
   the plugin's own `bin/briefing-bootstrap.exe` (WinHTTP and BCrypt; no

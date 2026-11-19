@@ -319,11 +319,15 @@ class ChainTests(unittest.TestCase):
     def cache_dir(self, config):
         return config / "briefing" / "bin" / self.version
 
+    def pin_dir(self, config):
+        # <config>/briefing/bin/<version>/<first 16 hex digits of the pinned checksum>
+        return self.cache_dir(config) / self.asset_sha[:16]
+
     def cached_binary(self, config):
-        return self.cache_dir(config) / ("%s-%s" % (self.asset_name, self.asset_sha))
+        return self.pin_dir(config) / ("briefing.exe" if IS_WINDOWS else "briefing")
 
     def listing(self, config):
-        base = self.cache_dir(config)
+        base = self.pin_dir(config)
         return sorted(p.name for p in base.iterdir()) if base.exists() else []
 
     def provision(self, config):
@@ -339,7 +343,7 @@ class ChainTests(unittest.TestCase):
         self.assertTrue(
             self.cached_binary(config).is_file(),
             "no verified binary in %s: %r\n%s"
-            % (self.cache_dir(config), self.listing(config), detail),
+            % (self.pin_dir(config), self.listing(config), detail),
         )
         # A silent fallback must not pass as a provision: the cache entry has to be the
         # pinned asset, and the entry must not have reported that no binary ran.
@@ -506,8 +510,9 @@ class ChainTests(unittest.TestCase):
                 "the cached bytes are not the pinned asset",
             )
             if not IS_WINDOWS:
-                par = Path(str(self.cached_binary(config)) + ".par")
-                for path in (config / "briefing", config / "briefing" / "bin", self.cache_dir(config), par):
+                par = self.pin_dir(config) / "par"
+                for path in (config / "briefing", config / "briefing" / "bin",
+                             self.cache_dir(config), self.pin_dir(config), par):
                     self.assertTrue(path.is_dir(), path)
                     self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700, str(path))
                 self.assertEqual(stat.S_IMODE(self.cached_binary(config).stat().st_mode), 0o700)
@@ -611,7 +616,7 @@ class ChainTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
             self.assertIn(MARKER, result.stdout.decode("utf-8"))
 
-        par = Path(str(self.cached_binary(config)) + ".par")
+        par = self.pin_dir(config) / "par"
         for _ in range(3):
             if par.exists():
                 remove_tree(par)

@@ -38,6 +38,14 @@
 #define MAX_REDIRECTS 10
 #define VERIFIED_OPEN_RETRY_ATTEMPTS 250
 #define VERIFIED_OPEN_RETRY_DELAY_MS 20
+/* The cache layout of the POSIX starter (bin/briefing): the binary is
+ * <config>\briefing\bin\<version>\<pin>\briefing.exe with its PAR directory <pin>\par, where
+ * <pin> is the first 16 hex digits of the pinned SHA-256. The pin directory is a name, never
+ * the trust anchor: the file is rehashed against the full pin before every start. The short
+ * names keep the plain path within reach of PAR's loader (see PAR_TREE_RESERVE). */
+#define CACHE_PIN_LENGTH 16
+#define CACHE_BINARY_W L"briefing.exe"
+#define CACHE_PAR_W L"par"
 
 struct wide_buffer {
     wchar_t *data;
@@ -640,6 +648,8 @@ static int version_character(wchar_t value)
            value == L'.' || value == L'_' || value == L'+' || value == L'-';
 }
 
+/* The gated fixture child must sit where the pinned binary would:
+ * <config>\briefing\bin\<version>\<16 lower-case hex digits>\<file name>. */
 static int child_is_in_versioned_cache(
     const wchar_t *config, const wchar_t *child
 )
@@ -647,6 +657,7 @@ static int child_is_in_versioned_cache(
     wchar_t *cache = join_path(config, L"briefing\\bin\\");
     const wchar_t *version;
     const wchar_t *cursor;
+    size_t index;
     int valid = 0;
 
     if (cache == NULL) {
@@ -671,6 +682,19 @@ static int child_is_in_versioned_cache(
         cursor++;
     }
     if (cursor == version || *cursor != L'\\' || cursor[1] == L'\0') {
+        free(cache);
+        return 0;
+    }
+    cursor++;
+    for (index = 0; index < CACHE_PIN_LENGTH; index++) {
+        if (!((cursor[index] >= L'0' && cursor[index] <= L'9') ||
+              (cursor[index] >= L'a' && cursor[index] <= L'f'))) {
+            free(cache);
+            return 0;
+        }
+    }
+    cursor += CACHE_PIN_LENGTH;
+    if (*cursor != L'\\' || cursor[1] == L'\0') {
         free(cache);
         return 0;
     }
@@ -1483,9 +1507,13 @@ static const char *reason_text(const char *format, ...)
  * long form is used when it qualifies, else its 8.3 alias; callers check that the chosen name
  * opens the verified object. */
 
-/* The deepest relative path PAR extracts below PAR_GLOBAL_TEMP (45 characters in the 0.001
- * probe's inc/ tree), with margin. */
-#define PAR_TREE_RESERVE 64
+/* The deepest relative path PAR extracts below PAR_GLOBAL_TEMP: 45 characters in the 0.001
+ * probe's inc/ tree, 82 in a local Linux build that pulled in Moose's exception classes. The
+ * reserve covers such a tree with margin. With C:\Users\<20 characters>\.claude as the
+ * configuration and version 0.001, the PAR directory ...\bin\0.001\<pin>\par is 77 characters,
+ * so its long form qualifies up to a reserve of 182; with 128 it qualifies while the
+ * configuration directory has at most 96 characters minus the version's length. */
+#define PAR_TREE_RESERVE 128
 /* PAR extracts its interpreter as <PAR_GLOBAL_TEMP>\<program name>, first as "<that>.<pid>":
  * a separator, a dot and up to 20 digits beyond the name. */
 #define PAR_INTERPRETER_SUFFIX 22
@@ -1774,7 +1802,8 @@ static int append_cache_lock(
     return 1;
 }
 
-static HANDLE cache_version_directory_handle(const struct cache_lock *lock)
+/* The innermost locked directory; once ensure_private_cache has returned, the pin directory. */
+static HANDLE cache_entry_directory_handle(const struct cache_lock *lock)
 {
     if (lock->count == 0) {
         return INVALID_HANDLE_VALUE;
@@ -1880,9 +1909,14 @@ static int ensure_private_directory(
     return protect_object(path, 1, security, inheritable);
 }
 
+/* Returns the pin directory <config>\briefing\bin\<version>\<pin>, with every directory of the
+ * chain locked. The chain down to the version directory is created with plain paths; the pin
+ * directory is named from the extended final path of the locked version directory, as the
+ * entries inside it are, so it adds nothing to the plain-path limit. */
 static wchar_t *ensure_private_cache(
     const wchar_t *config,
     const wchar_t *version_name,
+    const wchar_t *pin_name,
     const struct private_security *security,
     struct cache_lock *lock
 )
@@ -1890,6 +1924,8 @@ static wchar_t *ensure_private_cache(
     wchar_t *briefing = NULL;
     wchar_t *bin = NULL;
     wchar_t *version = NULL;
+    wchar_t *bound_version = NULL;
+    wchar_t *pin = NULL;
 
     if (!ensure_configuration_chain(config, security, lock)) {
         goto fail;
@@ -1907,19 +1943,32 @@ static wchar_t *ensure_private_cache(
     }
     version = join_path(bin, version_name);
     if (version == NULL || !ensure_private_directory(version, security, 0) ||
-        !append_cache_lock(lock, version, FILE_ADD_FILE)) {
+        !append_cache_lock(lock, version, 0)) {
+        goto fail;
+    }
+    bound_version = final_path_by_handle(cache_entry_directory_handle(lock));
+    if (bound_version == NULL || !path_components_safe(bound_version, 0)) {
+        goto fail;
+    }
+    pin = join_path(bound_version, pin_name);
+    if (pin == NULL || !ensure_private_directory(pin, security, 0) ||
+        !append_cache_lock(lock, pin, FILE_ADD_FILE)) {
         goto fail;
     }
     if (!cache_lock_valid(lock)) {
         goto fail;
     }
 
+    free(bound_version);
+    free(version);
     free(bin);
     free(briefing);
-    return version;
+    return pin;
 
 fail:
     release_cache_lock(lock);
+    free(pin);
+    free(bound_version);
     free(version);
     free(bin);
     free(briefing);
@@ -2980,22 +3029,18 @@ static int safe_delete_regular(const wchar_t *path)
     return deleted;
 }
 
-static wchar_t *cache_binary_path(
-    const wchar_t *version_directory, const struct pin_manifest *pins
-)
+/* The PAR directory of a binary is "par" beside it, in the same pin directory. */
+static wchar_t *par_directory_beside(const wchar_t *binary)
 {
-    struct wide_buffer name = {NULL, 0, 0};
-    wchar_t *path;
+    wchar_t *directory = parent_directory(binary);
+    wchar_t *par_directory;
 
-    if (!append_text(&name, pins->windows_asset) ||
-        !append_character(&name, L'-') ||
-        !append_text(&name, pins->windows_hex)) {
-        free(name.data);
+    if (directory == NULL) {
         return NULL;
     }
-    path = join_path(version_directory, name.data);
-    free(name.data);
-    return path;
+    par_directory = join_path(directory, CACHE_PAR_W);
+    free(directory);
+    return par_directory;
 }
 
 /* *error is the Windows error of a failed creation or protection, or ERROR_SUCCESS when
@@ -3044,7 +3089,7 @@ static HANDLE provision_binary(
     const char **why
 )
 {
-    HANDLE directory_lock = cache_version_directory_handle(cache_lock);
+    HANDLE directory_lock = cache_entry_directory_handle(cache_lock);
     HANDLE temporary = INVALID_HANDLE_VALUE;
     HANDLE verified = INVALID_HANDLE_VALUE;
     wchar_t *initial_directory = NULL;
@@ -3235,7 +3280,7 @@ static HANDLE provision_binary(
         goto cleanup;
     }
 
-    /* The rename names the full final path of the locked version directory; the renamed
+    /* The rename names the full final path of the locked pin directory; the renamed
      * handle must then be exactly there. */
     if (rename_open_file(temporary, bound_destination, &rename_error)) {
         installed = 1;
@@ -3340,8 +3385,9 @@ static HANDLE find_binary(
 )
 {
     wchar_t *manifest_path = NULL;
-    wchar_t *version_directory = NULL;
+    wchar_t *pin_directory = NULL;
     wchar_t *bound_directory = NULL;
+    wchar_t pin_name[CACHE_PIN_LENGTH + 1];
     struct pin_manifest pins;
     HANDLE verified = INVALID_HANDLE_VALUE;
     struct verify_failure verify_failure = {VERIFY_OPEN, ERROR_SUCCESS};
@@ -3362,29 +3408,30 @@ static HANDLE find_binary(
         goto cleanup;
     }
 
-    version_directory = ensure_private_cache(
-        config, pins.version, security, cache_lock
+    memcpy(pin_name, pins.windows_hex, CACHE_PIN_LENGTH * sizeof(wchar_t));
+    pin_name[CACHE_PIN_LENGTH] = L'\0';
+    pin_directory = ensure_private_cache(
+        config, pins.version, pin_name, security, cache_lock
     );
-    if (version_directory == NULL) {
+    if (pin_directory == NULL) {
         *why_binary = "cannot create and bind the complete private binary cache path";
         goto cleanup;
     }
-    /* This process is not long-path aware, so a plain name beneath the configured
-     * directory fails once it reaches MAX_PATH: the binary's file name alone is about 100
-     * characters and CreateDirectoryW stops at 248. The cache entry and its PAR directory
-     * are named from the extended final path of the locked version directory instead, as
-     * provision_binary names them. */
-    bound_directory = final_path_by_handle(cache_version_directory_handle(cache_lock));
+    /* This process is not long-path aware: a plain path fails once it reaches MAX_PATH
+     * (CreateDirectoryW at 248). The cache entry and its PAR directory are named from the
+     * extended final path of the locked pin directory instead, as provision_binary names
+     * them. */
+    bound_directory = final_path_by_handle(cache_entry_directory_handle(cache_lock));
     if (bound_directory == NULL || !path_components_safe(bound_directory, 0)) {
         *why_binary = "the binary cache directory has no safe final path";
         goto cleanup;
     }
-    *binary_path = cache_binary_path(bound_directory, &pins);
+    *binary_path = join_path(bound_directory, CACHE_BINARY_W);
     if (*binary_path == NULL) {
         *why_binary = "cannot construct the pinned binary cache path";
         goto cleanup;
     }
-    *par_directory = append_suffix(*binary_path, L".par");
+    *par_directory = join_path(bound_directory, CACHE_PAR_W);
     if (*par_directory == NULL) {
         *why_binary = "cannot construct the PAR cache path";
         goto cleanup;
@@ -3454,7 +3501,7 @@ static HANDLE find_binary(
 
 cleanup:
     free(bound_directory);
-    free(version_directory);
+    free(pin_directory);
     free(manifest_path);
     if (verified == INVALID_HANDLE_VALUE) {
         release_cache_lock(cache_lock);
@@ -3859,7 +3906,7 @@ static int run_verified_child(
         *why = "the verified Windows binary has no final path";
         goto cleanup;
     }
-    par_directory = append_suffix(program, L".par");
+    par_directory = par_directory_beside(program);
     if (par_directory == NULL) {
         *why = "cannot construct the PAR cache path";
         goto cleanup;
@@ -3965,7 +4012,7 @@ static int run_test_child(
         write_error("briefing-bootstrap: the gated fixture child is not a regular file\n");
         goto cleanup;
     }
-    par_directory = append_suffix(canonical_child, L".par");
+    par_directory = par_directory_beside(canonical_child);
     if (par_directory == NULL ||
         !ensure_par_directory(par_directory, security, &par_error)) {
         write_error("briefing-bootstrap: cannot create a private PAR cache path\n");

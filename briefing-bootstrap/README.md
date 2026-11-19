@@ -15,10 +15,12 @@ lines name one version that starts with `[A-Za-z0-9]` and has only
 `[A-Za-z0-9._+-]`, otherwise the manifest is malformed. No version is compiled
 into the executable, so a new release needs only a new pin file. The bootstrap
 selects `briefing-<version>-windows-x86_64.exe`. The binary lives in the
-versioned cache `<config>\briefing\bin\<version>\`; the cache directories carry
-a protected access list for the current user only and reparse points are
-rejected. Before every start the binary is rehashed with BCrypt SHA-256 and
-compared with the pin. Only `briefing hook session-start` provisions: it
+versioned cache as `<config>\briefing\bin\<version>\<pin>\briefing.exe`, the
+starter's layout, where `<pin>` is the first 16 hex digits of the pinned
+SHA-256; the cache directories carry a protected access list for the current
+user only and reparse points are rejected. Before every start the binary is
+rehashed with BCrypt SHA-256 and compared with the full pin; the directory name
+is never the trust anchor. Only `briefing hook session-start` provisions: it
 downloads the asset from
 `https://github.com/Getty/briefing/releases/download/<version>/` over HTTPS
 with WinHTTP (at most 256 MiB), verifies it and moves it into the cache; any
@@ -27,8 +29,13 @@ other invocation uses a cached verified binary or a fallback.
 (`<base>/<asset>`), as in the POSIX starter: a mirror override that production
 honors over HTTPS, with every redirect HTTPS too. That is safe from any source
 because nothing is kept or run unless its SHA-256 is the pinned one. A stable,
-versioned `PAR_GLOBAL_TEMP` beside the binary keeps the PAR runtime unpacked
-in the cache. The binary runs through `CreateProcessW` with the original
+versioned `PAR_GLOBAL_TEMP`, the directory `par` beside the binary, keeps the
+PAR runtime unpacked in the cache. PAR's loader accepts only plain ANSI paths
+below MAX_PATH, including the tree it extracts: the bootstrap hands it the
+long path when that leaves room for the tree, otherwise the 8.3 alias, and
+falls back with a stated reason when neither qualifies. With the short layout
+the long path qualifies for an ASCII configuration directory of up to about
+90 characters. The binary runs through `CreateProcessW` with the original
 arguments, working directory, standard handles and exit status, and with the
 caller's environment except `PAR_GLOBAL_TEMP`, which the bootstrap sets to
 that directory.
@@ -84,7 +91,7 @@ python -m unittest tests.test_windows_wiring -v
 python tests/test_briefing_bootstrap.py C:\absolute\path\to\briefing-bootstrap.exe
 ```
 
-The native suite (36 contracts in `tests/test_briefing_bootstrap.py`) covers
+The native suite (39 contracts in `tests/test_briefing_bootstrap.py`) covers
 Unicode paths and arguments, Windows quoting, inherited UTF-8 standard streams, environment and current-directory preservation,
 versioned `PAR_GLOBAL_TEMP`, relative-config rejection, and exact child exit
 status.

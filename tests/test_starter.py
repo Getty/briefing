@@ -95,6 +95,8 @@ class StarterTest(unittest.TestCase):
             "transcript_path": str(self.home / ".claude" / "projects" / "p" / "s.jsonl"),
         })
         self.asset = self.asset_for(OS_NAME, ARCH)
+        # The version directory: <config>/briefing/bin/<VERSION>. The binary lives one level
+        # deeper, in the pin directory (see pin_dir); the swap tests swap this directory.
         self.cache_dir = self.config / "briefing" / "bin" / VERSION
         self.execution_marker = self.tmp / "fixture-executed"
         # BRIEFING_TEST_SHELL points the suite at another POSIX shell (e.g. bash, as macOS /bin/sh is).
@@ -126,8 +128,19 @@ class StarterTest(unittest.TestCase):
         self.write_pins(self.canonical_pins(data))
         return sha256(data)
 
+    def pin_dir(self, data=FAKE_BINARY):
+        """The pin directory: the first 16 lowercase hex digits of the pinned checksum."""
+        return self.cache_dir / sha256(data)[:16]
+
+    def cache_file(self, data=FAKE_BINARY):
+        return self.pin_dir(data) / "briefing"
+
+    def par_dir(self, data=FAKE_BINARY):
+        return self.pin_dir(data) / "par"
+
     def cached_binary(self, asset, data=FAKE_BINARY):
-        cached = self.cache_dir / ("%s-%s" % (asset, sha256(data)))
+        # `asset` stays in the signature: the cache file name no longer carries it.
+        cached = self.cache_file(data)
         cached.parent.mkdir(parents=True, exist_ok=True)
         cached.write_bytes(data)
         cached.chmod(0o700)
@@ -169,7 +182,10 @@ class StarterTest(unittest.TestCase):
         self.addCleanup(stop_server)
         return "http://127.0.0.1:%d/%s" % (server.server_port, VERSION)
 
-    def _swap_window_tools(self, data, foreign, displaced, trigger_stage, macos_hash=None):
+    def _swap_window_tools(self, data, foreign, displaced, trigger_stage, macos_hash=None,
+                           swap_dir=None):
+        if swap_dir is None:
+            swap_dir = self.cache_dir
         fixture = self.tmp / ("swap-window-" + trigger_stage + "-fixture")
         fixture.write_bytes(data)
         operations = self.tmp / ("swap-window-" + trigger_stage + "-operations.log")
@@ -241,13 +257,13 @@ class StarterTest(unittest.TestCase):
                     % (shlex.quote(str(downloaded)), shlex.quote(str(triggered)),
                        shlex.quote(str(calls)),
                        shlex.quote(real_mv),
-                       shlex.quote(str(self.cache_dir)), shlex.quote(str(displaced)),
+                       shlex.quote(str(swap_dir)), shlex.quote(str(displaced)),
                        shlex.quote(str(calls)),
                        shlex.quote(real_ln), shlex.quote(str(foreign)),
-                       shlex.quote(str(self.cache_dir)), shlex.quote(str(calls)),
+                       shlex.quote(str(swap_dir)), shlex.quote(str(calls)),
                        shlex.quote(str(triggered))))
             elif tool == "ln" and trigger_stage == "ln":
-                bin_file = self.cache_dir / ("%s-%s" % (self.asset, sha256(data)))
+                bin_file = self.cache_file(data)
                 trigger = (
                     "if [ ! -e %s ]; then\n"
                     "  for argument do\n"
@@ -262,11 +278,11 @@ class StarterTest(unittest.TestCase):
                     "fi\n"
                     % (shlex.quote(str(triggered)), shlex.quote(str(realpath)),
                        shlex.quote(str(bin_file)), shlex.quote(real_mv),
-                       shlex.quote(str(self.cache_dir)), shlex.quote(str(displaced)),
+                       shlex.quote(str(swap_dir)), shlex.quote(str(displaced)),
                        shlex.quote(real_ln), shlex.quote(str(foreign)),
-                       shlex.quote(str(self.cache_dir)), shlex.quote(str(triggered))))
+                       shlex.quote(str(swap_dir)), shlex.quote(str(triggered))))
             elif tool == "rm" and trigger_stage == "rm-retry":
-                retry_file = self.cache_dir / ("." + self.asset + ".failed-at")
+                retry_file = self.pin_dir(data) / ("." + self.asset + ".failed-at")
                 trigger = (
                     "if [ ! -e %s ]; then\n"
                     "  for argument do\n"
@@ -281,9 +297,9 @@ class StarterTest(unittest.TestCase):
                     "fi\n"
                     % (shlex.quote(str(triggered)), shlex.quote(str(realpath)),
                        shlex.quote(str(retry_file)), shlex.quote(real_mv),
-                       shlex.quote(str(self.cache_dir)), shlex.quote(str(displaced)),
+                       shlex.quote(str(swap_dir)), shlex.quote(str(displaced)),
                        shlex.quote(real_ln), shlex.quote(str(foreign)),
-                       shlex.quote(str(self.cache_dir)), shlex.quote(str(triggered))))
+                       shlex.quote(str(swap_dir)), shlex.quote(str(triggered))))
             wrapper = bindir / tool
             wrapper.write_text(
                 "#!/bin/sh\n"
@@ -468,11 +484,13 @@ class StarterTest(unittest.TestCase):
                 "BRIEFING_STARTER_TESTING": "1",
                 "BRIEFING_STARTER_TEST_OS": "Darwin",
             })
-        cached = self.cache_dir / ("%s-%s" % (macos_asset, digest))
+        cached = self.cache_dir / digest[:16] / "briefing"
 
         self.assertTrue(cached.is_file(), self.files_left())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertRegex(result.stdout, r"^FAKE .*%s\.par\|hook session-start" % cached.name)
+        self.assertTrue(
+            result.stdout.startswith("FAKE %s|hook session-start" % (cached.parent / "par")),
+            result.stdout)
         self.assertEqual(self.files_left(), [str(cached.relative_to(self.config))])
 
     def test_macos_hash_path_uses_native_openssl_not_shasum(self):
@@ -542,7 +560,7 @@ class StarterTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("FAKE", result.stdout)
-        self.assertIn(cached.name, result.stdout)
+        self.assertIn(str(cached.parent / "par"), result.stdout)
         self.assertNotIn(MARKER, result.stdout)
 
     # --- spawn hooks never download
@@ -642,7 +660,7 @@ class StarterTest(unittest.TestCase):
         result = self.run_starter(
             "hook", "session-start", url=self.serve(data, name="testing-gate"),
             now=NOW, testing=True)
-        cached = self.cache_dir / ("%s-%s" % (self.asset, digest))
+        cached = self.cache_dir / digest[:16] / "briefing"
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.execution_marker.is_file(), "the test fixture was not executed")
@@ -658,6 +676,7 @@ class StarterTest(unittest.TestCase):
             ("briefing", ("briefing",)),
             ("bin", ("briefing", "bin")),
             ("version", ("briefing", "bin", VERSION)),
+            ("pin", ("briefing", "bin", VERSION, sha256(data)[:16])),
         )
 
         for label, parts in cases:
@@ -867,7 +886,10 @@ class StarterTest(unittest.TestCase):
         foreign = self.tmp / "foreign-cache-before-warmup"
         foreign.mkdir()
         foreign.chmod(0o700)
-        foreign_par = foreign / ("%s-%s.par" % (self.asset, digest))
+        foreign_pin = foreign / digest[:16]
+        foreign_pin.mkdir()
+        foreign_pin.chmod(0o700)
+        foreign_par = foreign_pin / "par"
         foreign_par.mkdir()
         foreign_par.chmod(0o777)
         displaced = self.tmp / "displaced-cache-before-warmup"
@@ -888,13 +910,53 @@ class StarterTest(unittest.TestCase):
                          "the fixture was warmed after the cache path became unsafe")
         self.assertEqual(stat.S_IMODE(foreign_par.stat().st_mode), 0o777,
                          "the unsafe PAR directory was chmodded through the swapped path")
-        self.assertEqual(list(foreign.iterdir()), [foreign_par],
+        self.assertEqual(list(foreign.iterdir()), [foreign_pin],
                          "the pre-warm-up swap changed foreign cache contents")
+        self.assertEqual(list(foreign_pin.iterdir()), [foreign_par],
+                         "the pre-warm-up swap changed the foreign pin directory")
         self.assertEqual(list(foreign_par.iterdir()), [],
                          "the pre-warm-up swap wrote into the foreign PAR directory")
         if displaced.exists():
             self.assertEqual([path for path in displaced.rglob("*") if path.is_file()], [],
                              "the pre-warm-up swap left a temporary file behind")
+        self.assert_python_briefed(result)
+
+    def test_pin_directory_swap_before_warmup_is_rejected(self):
+        data = self.marker_binary()
+        self.pin(data)
+        # The foreign directory stands in for the pin directory: its PAR directory is the
+        # unsafe target a path-based warm-up would chmod and fill.
+        foreign = self.tmp / "foreign-pin-before-warmup"
+        foreign.mkdir()
+        foreign.chmod(0o700)
+        foreign_par = foreign / "par"
+        foreign_par.mkdir()
+        foreign_par.chmod(0o777)
+        displaced = self.tmp / "displaced-pin-before-warmup"
+        path, operations, triggered = self._swap_window_tools(
+            data, foreign, displaced, "post-download", swap_dir=self.pin_dir(data))
+
+        result = self.run_starter(
+            "hook", "session-start", url="https://fixtures.invalid", now=NOW,
+            extra_env={"PATH": path})
+
+        self.assertTrue(triggered.is_file(),
+                        "the pin directory swap did not run\n" + self.swap_diagnostics(result))
+        foreign_operations = operations.read_text().splitlines() if operations.exists() else []
+        self.assertEqual(foreign_operations, [],
+                         "the pin directory swap redirected a path operation into the foreign tree")
+        self.assertFalse(self.execution_marker.exists(),
+                         "the fixture was warmed after the pin directory became unsafe")
+        self.assertEqual(stat.S_IMODE(foreign_par.stat().st_mode), 0o777,
+                         "the foreign PAR directory was chmodded through the swapped pin directory")
+        self.assertEqual(list(foreign.iterdir()), [foreign_par],
+                         "the pin directory swap changed the foreign tree")
+        self.assertEqual(list(foreign_par.iterdir()), [],
+                         "the pin directory swap wrote into the foreign PAR directory")
+        self.assertEqual([p for p in displaced.rglob("*") if p.is_file()], [],
+                         "the displaced pin directory holds files")
+        leftovers = [p for p in (self.config / "briefing" / "bin").iterdir() if p.is_file()]
+        self.assertEqual(leftovers, [], "a temporary download was left in briefing/bin")
         self.assert_python_briefed(result)
 
     def test_swap_after_final_revalidation_before_install_is_rejected(self):
@@ -960,7 +1022,14 @@ class StarterTest(unittest.TestCase):
             self.assertIn("TRUSTED", result.stdout,
                           "the verified descriptor was not executed: " + result.stdout)
 
-    def _post_install_swap(self, simulate_macos):
+    def test_pin_directory_swap_after_install_cannot_execute_unverified_public_binary(self):
+        self._post_install_swap(simulate_macos=False, swap_pin=True)
+
+    @unittest.skipUnless(OS_NAME == "linux", "the native macOS leg runs the unsimulated test")
+    def test_pin_directory_swap_on_path_exec_platform_is_detected_and_falls_back(self):
+        self._post_install_swap(simulate_macos=True, swap_pin=True)
+
+    def _post_install_swap(self, simulate_macos, swap_pin=False):
         extra_env = {}
         if simulate_macos:
             self.asset = self.asset_for("macos", ARCH)
@@ -981,12 +1050,20 @@ class StarterTest(unittest.TestCase):
         foreign = self.tmp / "foreign-cache-after-install"
         foreign.mkdir()
         foreign.chmod(0o700)
-        foreign_binary = foreign / ("%s-%s" % (self.asset, digest))
+        if swap_pin:
+            # The pin directory itself is replaced: the foreign directory is the pin directory.
+            foreign_pin = foreign
+        else:
+            foreign_pin = foreign / digest[:16]
+            foreign_pin.mkdir()
+            foreign_pin.chmod(0o700)
+        foreign_binary = foreign_pin / "briefing"
         foreign_binary.write_bytes(foreign_bytes)
         foreign_binary.chmod(0o700)
         displaced = self.tmp / "displaced-cache-after-install"
         path, _operations, triggered = self._swap_window_tools(
-            trusted, foreign, displaced, "rm-retry", macos_hash=simulate_macos or None)
+            trusted, foreign, displaced, "rm-retry", macos_hash=simulate_macos or None,
+            swap_dir=self.pin_dir(trusted) if swap_pin else None)
         extra_env["PATH"] = path
 
         result = self.run_starter(
@@ -997,7 +1074,11 @@ class StarterTest(unittest.TestCase):
                         "the post-install cache swap did not run\n" + self.swap_diagnostics(result))
         self.assertFalse(foreign_marker.exists(),
                          "unverified foreign bytes ran after successful installation")
-        self.assertEqual(list(foreign.iterdir()), [foreign_binary])
+        if swap_pin:
+            self.assertEqual(list(foreign.iterdir()), [foreign_binary])
+        else:
+            self.assertEqual(list(foreign.iterdir()), [foreign_pin])
+            self.assertEqual(list(foreign_pin.iterdir()), [foreign_binary])
         self.assertEqual(foreign_binary.read_bytes(), foreign_bytes,
                          "the post-install path changed the foreign binary")
         self.assertEqual(stat.S_IMODE(foreign_binary.stat().st_mode), 0o700)
@@ -1031,7 +1112,10 @@ class StarterTest(unittest.TestCase):
         foreign = self.tmp / "foreign-cache-after-hit"
         foreign.mkdir()
         foreign.chmod(0o700)
-        foreign_binary = foreign / ("%s-%s" % (self.asset, digest))
+        foreign_pin = foreign / digest[:16]
+        foreign_pin.mkdir()
+        foreign_pin.chmod(0o700)
+        foreign_binary = foreign_pin / "briefing"
         foreign_binary.write_bytes(foreign_bytes)
         foreign_binary.chmod(0o700)
         displaced = self.tmp / "displaced-cache-after-hit"
@@ -1045,7 +1129,8 @@ class StarterTest(unittest.TestCase):
         self.assertTrue(triggered.is_file(), "the cache-hit post-hash swap did not run")
         self.assertFalse(foreign_marker.exists(),
                          "unverified foreign bytes ran after the cache-hit hash check")
-        self.assertEqual(list(foreign.iterdir()), [foreign_binary])
+        self.assertEqual(list(foreign.iterdir()), [foreign_pin])
+        self.assertEqual(list(foreign_pin.iterdir()), [foreign_binary])
         self.assertEqual(foreign_binary.read_bytes(), foreign_bytes,
                          "the cache-hit path changed the foreign binary")
         self.assertEqual(stat.S_IMODE(foreign_binary.stat().st_mode), 0o700)
@@ -1059,12 +1144,12 @@ class StarterTest(unittest.TestCase):
         result = self.run_starter(
             "hook", "session-start", url=self.serve(data, name="private-cache"),
             now=NOW, testing=True, child_umask=0)
-        cached = self.cache_dir / ("%s-%s" % (self.asset, digest))
+        cached = self.cache_dir / digest[:16] / "briefing"
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(cached.is_file(), self.files_left())
         for path in (self.config / "briefing", self.config / "briefing" / "bin",
-                     self.cache_dir, cached):
+                     self.cache_dir, cached.parent, cached):
             with self.subTest(path=str(path)):
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
 
@@ -1072,7 +1157,7 @@ class StarterTest(unittest.TestCase):
         data = self.marker_binary()
         self.pin(data)
         cached = self.cached_binary(self.asset, data)
-        par_dir = Path(str(cached) + ".par")
+        par_dir = cached.parent / "par"
         par_dir.mkdir()
         par_dir.chmod(0o777)
 
@@ -1081,6 +1166,110 @@ class StarterTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.execution_marker.exists(), "the verified cached fixture did not run")
         self.assertEqual(stat.S_IMODE(par_dir.stat().st_mode), 0o700)
+
+    @unittest.skipUnless(HAVE_CURL, "skipped: curl is not available for the file:// download")
+    def test_binary_and_par_directory_sit_at_the_short_pin_layout(self):
+        digest = self.pin()
+        pin = digest[:16]
+        self.assertRegex(pin, r"^[0-9a-f]{16}$")
+        pin_directory = self.config / "briefing" / "bin" / VERSION / pin
+
+        provision = self.run_starter(
+            "hook", "session-start", url=self.serve(FAKE_BINARY), now=NOW, testing=True)
+        hit = self.run_starter("hook", "subagent-start", url="file:///nonexistent")
+
+        # The binary has a fixed name; neither the asset name nor the full checksum is in
+        # the path, and the PAR directory is plain `par` beside it.
+        self.assertEqual(self.files_left(), ["briefing/bin/%s/%s/briefing" % (VERSION, pin)])
+        self.assertEqual(sorted(p.name for p in pin_directory.iterdir()), ["briefing"])
+        for result in (provision, hit):
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(
+                result.stdout.startswith("FAKE %s|hook " % (pin_directory / "par")),
+                result.stdout)
+
+    @unittest.skipUnless(HAVE_CURL, "skipped: curl is not available for the file:// download")
+    def test_another_pin_for_the_same_version_provisions_into_a_new_pin_directory(self):
+        first = self.marker_binary()
+        second = first + b"# rebuilt under the same version\n"
+        self.pin(first)
+        self.run_starter(
+            "hook", "session-start", url=self.serve(first, name="first"), now=NOW, testing=True)
+        self.assertTrue(self.cache_file(first).is_file(), self.files_left())
+        first_bytes = self.cache_file(first).read_bytes()
+
+        self.pin(second)
+        self.execution_marker.unlink()
+        self.assertNotEqual(self.pin_dir(first), self.pin_dir(second))
+        # With the new pin the old entry is not used: a spawn hook falls back, never downloads.
+        spawn = self.run_starter("hook", "subagent-start", url="file:///nonexistent")
+        self.assertFalse(self.execution_marker.exists(), "the entry of the old pin was executed")
+        self.assert_python_briefed(spawn)
+        result = self.run_starter(
+            "hook", "session-start", url=self.serve(second, name="second"), now=NOW, testing=True)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.execution_marker.is_file(), "the binary of the new pin did not run")
+        self.assertEqual(self.cache_file(second).read_bytes(), second)
+        self.assertEqual(stat.S_IMODE(self.pin_dir(second).stat().st_mode), 0o700)
+        self.assertEqual(self.cache_file(first).read_bytes(), first_bytes,
+                         "the entry of the old pin was changed")
+        self.assertEqual(sorted(p.name for p in self.cache_dir.iterdir()),
+                         sorted([self.pin_dir(first).name, self.pin_dir(second).name]))
+
+    @unittest.skipUnless(HAVE_CURL, "skipped: curl is not available for the file:// download")
+    def test_temporary_downloads_stay_in_the_bin_directory_and_are_never_left_behind(self):
+        good = self.marker_binary()
+        cases = (
+            ("verified", good, good),
+            ("wrong-hash", good, EVIL_BINARY),
+        )
+        for label, pinned, served in cases:
+            with self.subTest(case=label):
+                self.config = self.tmp / ("cfg-temp-" + label)
+                self.cache_dir = self.config / "briefing" / "bin" / VERSION
+                self.pin(pinned)
+                fixture = self.tmp / ("temp-fixture-" + label)
+                fixture.write_bytes(served)
+                log = self.tmp / ("temp-downloads-" + label + ".log")
+                bindir = self.tmp / ("temp-tools-" + label)
+                bindir.mkdir()
+                curl = bindir / "curl"
+                curl.write_text(
+                    "#!/bin/sh\n"
+                    "output=\n"
+                    "while [ \"$#\" -gt 0 ]; do\n"
+                    "  case $1 in\n"
+                    "    -o|--output) output=$2; shift 2 ;;\n"
+                    "    --output=*) output=${1#*=}; shift ;;\n"
+                    "    -o*) output=${1#-o}; shift ;;\n"
+                    "    *) shift ;;\n"
+                    "  esac\n"
+                    "done\n"
+                    "printf '%%s\\n' \"$output\" >> %s\n"
+                    "cat %s >\"$output\"\n"
+                    % (shlex.quote(str(log)), shlex.quote(str(fixture))))
+                curl.chmod(0o755)
+                path = "%s%s%s" % (bindir, os.pathsep, os.environ["PATH"])
+
+                self.run_starter(
+                    "hook", "session-start", url="https://fixtures.invalid", now=NOW,
+                    extra_env={"PATH": path})
+
+                downloads = [Path(line) for line in log.read_text().splitlines()]
+                self.assertEqual(len(downloads), 1, downloads)
+                bin_directory = self.config / "briefing" / "bin"
+                self.assertEqual(downloads[0].parent, bin_directory,
+                                 "the temporary download is not in briefing/bin")
+                self.assertTrue(downloads[0].name.startswith("." + self.asset + "."), downloads)
+                self.assertFalse(downloads[0].exists(), "the temporary download was left behind")
+                self.assertEqual(sorted(p.name for p in bin_directory.iterdir()), [VERSION])
+                self.assertEqual([p for p in self.cache_dir.iterdir()
+                                  if p.is_file() or p.name != sha256(pinned)[:16]], [])
+                self.assertEqual(
+                    [f for f in self.files_left() if not f.endswith(".failed-at")],
+                    ["briefing/bin/%s/%s/briefing" % (VERSION, sha256(pinned)[:16])]
+                    if label == "verified" else [])
 
     @unittest.skipUnless(HAVE_CURL, "skipped: curl is not available for the file:// download")
     def test_oversized_download_never_reaches_cache(self):
@@ -1199,7 +1388,7 @@ class StarterTest(unittest.TestCase):
         for returncode, stdout, stderr in results:
             self.assertEqual(returncode, 0, stderr)
             self.assertIn("FIXTURE", stdout)
-        cached = self.cache_dir / ("%s-%s" % (self.asset, digest))
+        cached = self.cache_dir / digest[:16] / "briefing"
         self.assertTrue(cached.is_file(), self.files_left())
         self.assertEqual(sha256(cached.read_bytes()), digest)
         self.assertEqual(self.files_left(), [str(cached.relative_to(self.config))])
@@ -1212,7 +1401,7 @@ class StarterTest(unittest.TestCase):
         url = self.serve(data, name="offline-cache")
         provision = self.run_starter(
             "hook", "session-start", url=url, now=NOW, testing=True)
-        cached = self.cache_dir / ("%s-%s" % (self.asset, digest))
+        cached = self.cache_dir / digest[:16] / "briefing"
         self.assertEqual(provision.returncode, 0, provision.stderr)
         self.assertTrue(cached.is_file(), self.files_left())
         self.assertTrue(self.execution_marker.exists(), "the provisioned fixture did not run")
@@ -1270,11 +1459,13 @@ class StarterTest(unittest.TestCase):
         digest = self.pin()
         result = self.run_starter(
             "hook", "session-start", url=self.serve(FAKE_BINARY), now=NOW, testing=True)
-        cached = self.cache_dir / ("%s-%s" % (self.asset, digest))
+        cached = self.cache_dir / digest[:16] / "briefing"
         self.assertTrue(cached.is_file(), self.files_left())
         self.assertTrue(os.access(str(cached), os.X_OK))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertRegex(result.stdout, r"^FAKE .*%s\.par\|hook session-start" % cached.name)
+        self.assertTrue(
+            result.stdout.startswith("FAKE %s|hook session-start" % (cached.parent / "par")),
+            result.stdout)
         self.assertEqual(self.files_left(), [str(cached.relative_to(self.config))])
 
     @unittest.skipUnless(HAVE_CURL, "skipped: curl is not available for the file:// download")
@@ -1308,7 +1499,7 @@ class StarterTest(unittest.TestCase):
         digest = self.pin()
         self.run_starter(
             "hook", "session-start", url=self.serve(FAKE_BINARY), now=NOW, testing=True)
-        cached = self.cache_dir / ("%s-%s" % (self.asset, digest))
+        cached = self.cache_dir / digest[:16] / "briefing"
         with open(str(cached), "ab") as handle:
             handle.write(b"echo TAMPERED\n")
         result = self.run_starter("hook", "subagent-start", url="file:///nonexistent")
@@ -1339,7 +1530,7 @@ class StarterTest(unittest.TestCase):
         bad = self.serve(EVIL_BINARY, name="bad")
         good = self.serve(FAKE_BINARY)
         self.run_starter("hook", "session-start", url=bad, now=NOW, testing=True)
-        marker = self.cache_dir / ("." + self.asset + ".failed-at")
+        marker = self.pin_dir() / ("." + self.asset + ".failed-at")
         self.assertTrue(marker.is_file(), self.files_left())
         self.assertEqual(marker.read_text().strip(), NOW)
         soon = self.run_starter(
@@ -1405,7 +1596,7 @@ class StarterTest(unittest.TestCase):
         self.starter.write_text(patched)
         # The CLI command that provisions: a SessionStart hook, using the default URL.
         result = self.run_starter("hook", "session-start", now=NOW, testing=True)
-        cached = self.cache_dir / ("%s-%s" % (self.asset, sha256(FAKE_BINARY)))
+        cached = self.cache_dir / sha256(FAKE_BINARY)[:16] / "briefing"
         self.assertTrue(cached.is_file(), "URL did not resolve to <base>/<version>/<asset>: "
                         + repr(self.files_left()))
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1452,7 +1643,8 @@ class StarterTest(unittest.TestCase):
                 (directory / asset).write_bytes(FAKE_BINARY)
                 result = self.run_starter(
                     "hook", "session-start", url="file://%s" % directory, now=NOW, testing=True)
-                cached = self.config / "briefing" / "bin" / version / ("%s-%s" % (asset, sha256(FAKE_BINARY)))
+                cached = (self.config / "briefing" / "bin" / version / sha256(FAKE_BINARY)[:16]
+                          / "briefing")
                 self.assertTrue(cached.is_file(), self.files_left())
                 self.assertRegex(result.stdout, r"\|hook session-start")
 

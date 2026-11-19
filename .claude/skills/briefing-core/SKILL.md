@@ -98,7 +98,9 @@ prove resolution, not actual integration by the harness.
 `bin/briefing` is the plugin's shell starter and what both hook files run
 (`hooks/hooks.json` with `args`, `hooks/codex-hooks.json` as command text because Codex
 ignores `args`). It uses the cached release binary
-`<claudeConfigDir>/briefing/bin/<version>/`, verified before every start against
+`<claudeConfigDir>/briefing/bin/<version>/<pin>/briefing` (`.exe` on Windows; `<pin>` = first 16
+hex of the pinned SHA-256, a name only) with its PAR directory `par/` beside it, verified before
+every start against the full hash in
 `bin/briefing-binaries.sha256` (absent or incomplete means: no download). That pin manifest is
 strict: exactly five entries (linux/macos x86_64+arm64, windows x86_64) for one version, written
 only by `scripts/import-binary-sums.py` from a release's `SHA256SUMS`; the release's own sums are
@@ -132,7 +134,10 @@ its test-only gate is `BRIEFING_BOOTSTRAP_TESTING=1`). The bootstrap does what t
 pin parsing (the release version comes from the manifest, under the starter's version rule;
 none is compiled in), WinHTTP download, BCrypt check, private cache, then the Python fallback
 by winlaunch's rule (`python3.exe`, else `python.exe`, else `py.exe -3`, along `PATH`, skipping
-directories containing `\WindowsApps`, started with `PYTHONUTF8=1`) and the Perl fallback. The
+directories containing `\WindowsApps`, started with `PYTHONUTF8=1`) and the Perl fallback.
+PAR's Windows loader takes only plain ANSI paths below MAX_PATH, its extracted tree included
+(`PAR_TREE_RESERVE`): the bootstrap hands it the long path when that qualifies, else the 8.3
+alias; the starter shares the short cache layout so ordinary ASCII profiles need no 8.3 names. The
 committed exe must equal a fresh build byte for byte (`bootstrap-windows` job of `ci.yml`).
 `bin/briefing-doctor` is a shell wrapper, not a symlink: POSIX starts Python
 through it; Windows uses the `# winlaunch:` directive through the adjacent `.exe`.

@@ -1,8 +1,9 @@
 #!/bin/sh
 # briefing starter: the plugin's `briefing` on PATH and the command its hooks run
 # (`briefing hook EVENT`, plugin hooks/hooks.json and hooks/codex-hooks.json). First match wins:
-#   1. the release binary of the plugin's version for this platform, cached under
-#      <claudeConfigDir>/briefing/bin/<version>/ and rechecked against its pinned checksum;
+#   1. the release binary of the plugin's version for this platform, cached as
+#      <claudeConfigDir>/briefing/bin/<version>/<pin>/briefing and rechecked against its pinned
+#      checksum (<pin>: the first 16 hex digits of that checksum);
 #   2. else that binary, downloaded only by the SessionStart hook (`hook session-start`; curl,
 #      else wget) - never by --version, --help, doctor or any other command, checked against the checksum pinned in the plugin (Linux `sha256sum`, macOS `openssl dgst -sha256`), then cached;
 #   3. else the plugin's own fallback, which is the previous behaviour, never unbriefed:
@@ -63,9 +64,15 @@ pinned_sums=briefing-binaries.sha256
 # or run unless its checksum is the pinned one.
 release_url_prefix=https://github.com/Getty/briefing/releases/download/
 release_tag_prefix=
-# The binary cache: <claudeConfigDir>/briefing/bin/<version>/ - shared by every harness that
-# starts this file.
+# The binary cache: <claudeConfigDir>/briefing/bin/<version>/<pin>/ - shared by every harness that
+# starts this file. <pin> is the first 16 hex digits of the pinned checksum. It is only a name:
+# what runs is decided by the full checksum, recomputed before every exec. It keeps a release
+# rebuilt under the same version apart and the path short; the Windows bootstrap uses the same
+# layout because PAR's Windows loader needs the whole path below MAX_PATH. The pin directory
+# holds the binary, its PAR directory and the retry stamp; temporary files stay in briefing/bin/.
 cache_subdir=briefing/bin
+cache_binary=briefing
+cache_par=par
 # A PAR binary unpacks its archive into $PAR_GLOBAL_TEMP on its first start (seconds, under /tmp
 # by default, which a reboot empties). Point it at a directory beside the binary and warm that
 # once, right after the download, so no hook pays for the unpacking.
@@ -241,7 +248,7 @@ path_components_safe() {
 # Cache paths are fixed once the pin manifest and configuration root are known.
 cache_components_safe() {
   [ "$#" -eq 1 ] || return 1
-  [ "$1" = "$config_dir/$cache_subdir/$version" ] || return 1
+  [ "$1" = "$config_dir/$cache_subdir/$version/$pin_dir" ] || return 1
   path_components_safe "$1"
 }
 
@@ -257,7 +264,7 @@ ensure_private_cache() {
   fi
 
   private_path=$config_dir
-  private_remaining=$cache_subdir/$version
+  private_remaining=$cache_subdir/$version/$pin_dir
   while [ -n "$private_remaining" ]; do
     case $private_remaining in
       */*) private_name=${private_remaining%%/*}; private_remaining=${private_remaining#*/} ;;
@@ -290,13 +297,16 @@ ensure_private_par_directory() {
   return 0
 }
 
-# Exclusively create a private, non-executable temporary file beside the version directory.
-# Keeping the process-owned file outside that final directory means a synchronized replacement
-# of the version path cannot redirect downloader or cleanup operations into the replacement.
+# Exclusively create a private, non-executable temporary file beside the version directory, two
+# levels above the pin directory $1 (in briefing/bin/). Keeping the process-owned file outside
+# the version and pin directories means a synchronized replacement of either path cannot
+# redirect downloader or cleanup operations into the replacement.
 new_temp() {
   [ "$#" -eq 1 ] || return 1
-  temp_parent=${1%/*}
-  [ -n "$temp_parent" ] && [ "$temp_parent" != "$1" ] || return 1
+  temp_version=${1%/*}
+  temp_parent=${temp_version%/*}
+  [ -n "$temp_parent" ] && [ "$temp_version" != "$1" ] && [ "$temp_parent" != "$temp_version" ] ||
+    return 1
   temp_try=0
   while [ "$temp_try" -lt 100 ]; do
     temp_candidate=$temp_parent/.$asset.$$.$temp_try.tmp
@@ -371,7 +381,7 @@ clear_failed_session_start() {
 # Trust boundary, stated honestly: the cache directory belongs to the user, and anyone who can
 # write there can already run code as that user. What is verified is the binary file - its pinned
 # hash is recomputed before every exec, and a download is checked before it is cached. The tree
-# the binary unpacks beside itself (<binary>.par/) is NOT re-verified: it is derived state that
+# the binary unpacks beside itself (par/) is NOT re-verified: it is derived state that
 # the binary itself extracted, and checking it would defend nothing the user's own permissions
 # do not already decide. A bad binary falls through to provision or the local engines.
 verify_binary_file() {
@@ -504,11 +514,12 @@ find_binary() {
       return 1
       ;;
   esac
-  cache_dir=$config_dir/$cache_subdir/$version
-  # The checksum is part of the name: a cached binary is always the one this plugin pins,
-  # even if a release were rebuilt under the same version.
-  bin_file=$cache_dir/$asset-$sum
-  par_dir=$bin_file.par
+  # The pin directory: the first 16 of the 64 checked hex digits ("?" matches one character).
+  pin_rest=${sum#????????????????}
+  pin_dir=${sum%"$pin_rest"}
+  cache_dir=$config_dir/$cache_subdir/$version/$pin_dir
+  bin_file=$cache_dir/$cache_binary
+  par_dir=$cache_dir/$cache_par
   retry_file=$cache_dir/.$asset.failed-at
   if ! cache_entry_safe; then
     why_binary="the binary cache contains a symlink and was refused"
@@ -591,8 +602,8 @@ fetch_binary() {
     drop_download "cannot enter the binary cache safely"
     return 1
   fi
-  bound_bin_file=./$asset-$sum
-  bound_par_dir=$bound_bin_file.par
+  bound_bin_file=./$cache_binary
+  bound_par_dir=./$cache_par
 
   if fetch_binary_bound; then fetch_status=0; else fetch_status=$?; fi
   if ! CDPATH='' cd -P -- "$fetch_origin" 2>/dev/null; then
