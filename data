@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T09:08:21Z
+id: 39
+priority: low
+status: backlog
+tags:
+- starter
+- binary
+title: 'Starter: a cached binary that cannot be rehashed is reported as not cached'
+updated: 2026-11-19T09:08:21Z
+---
+
+Found in the k23 docs pass (2026-11-19, HEAD 40c7bb3), reproduced on Linux: when sha256sum (Linux) or openssl (macOS) is missing, find_binary in bin/briefing fails the rehash of a cached pinned binary and then overwrites the reason, so the fallback message says 'the pinned binary is not cached; it is only downloaded by the SessionStart hook' (bin/briefing:550-551) instead of naming the missing hash tool. Done when the message names the actual reason, with a starter test.
