@@ -5,7 +5,7 @@ use Moo;
 use JSON::MaybeXS ();
 use namespace::clean;
 
-our $VERSION = '0.001';
+our $VERSION = '0.006000';
 
 has briefing => ( is => 'ro', required => 1 );
 

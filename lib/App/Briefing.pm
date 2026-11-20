@@ -9,7 +9,7 @@ use Encode qw( encode_utf8 );
 use JSON::MaybeXS ();
 use namespace::clean;
 
-our $VERSION = '0.001';
+our $VERSION = '0.006000';
 
 use constant BUDGET_BYTES => 64 * 1024;
 

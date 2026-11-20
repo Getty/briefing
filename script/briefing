@@ -7,7 +7,7 @@ use warnings;
 
 use App::Briefing::CLI;
 
-our $VERSION = '0.001';
+our $VERSION = '0.006000';
 
 exit App::Briefing::CLI->run(\@ARGV);
 
