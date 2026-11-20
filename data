@@ -1,0 +1,25 @@
+---
+class: standard
+completed: 2026-11-20T06:30:01Z
+created: 2026-11-20T06:03:04Z
+id: 41
+priority: high
+started: 2026-11-20T06:03:43Z
+status: done
+tags:
+- release
+title: 'Release prep: version 0.006000, drop TODO.md'
+updated: 2026-11-20T06:30:01Z
+---
+
+First CPAN release continues the plugin line: v0.5.3 is 0.005003 in Perl, so the dist starts at 0.006000 (0.6.0), keeping both sub-levels (maintainer decision 2026-11-20). Set our $VERSION to 0.006000 in lib/App/Briefing.pm, lib/App/Briefing/CLI.pm, lib/App/Briefing/Filesystem.pm, lib/App/Briefing/Team.pm and script/briefing; .codex-plugin/plugin.json 0.5.3 -> 0.6.0 (main agent choice, to match). TODO.md removed: every item ticked, partly outdated, open work lives on karr. .github/, .claude/ and misc/agent-context stay in the dist by the bundle convention (agent context as build provenance).
+
+2026-11-20 06:06 Worker: our $VERSION 0.001 -> 0.006000 in lib/App/Briefing.pm, CLI.pm, Filesystem.pm, Team.pm and script/briefing; .codex-plugin/plugin.json 0.5.3 -> 0.6.0 (.claude-plugin has no version field, unchanged). No test or doc pins the Codex manifest version. Version acceptance: bin/briefing platform_asset yields all five briefing-0.006000-<platform> names under sh, dash and bash; the bootstrap rule (version_start_character/version_character, VERSION_MAX_LENGTH 1638) and scripts/import-binary-sums.py _VERSION_TOKEN accept it. Fake-cache run of the starter (file:// under BRIEFING_STARTER_TESTING=1) provisioned <config>/briefing/bin/0.006000/<pin>/briefing with PAR_GLOBAL_TEMP <pin>/par. Checks running next.
+
+2026-11-20 06:11 Worker, coordinator additions: dist.ini author -> Torsten Raudssus <torsten@raudssus.de> (copyright_holder unchanged); comments above gather_exclude_match and [ExecDir] reworked to explain bin/ (plugin root: marketplace source ./, starter bin/briefing run by both hook files, bin/briefing.exe -> bin/briefing-bootstrap.exe, doctor launchers, plugin bin/ on PATH) vs script/ (deliberate exception to the bundle's executables-in-bin/ rule). Directive lines diff against HEAD: only the author line. Also found (not fixed, release manager's call): @Author::GETTY passes allow_dirty_match ^bin/ to @Git::VersionManager's post-release commit, whose own default is ^lib/.*\.pm$. BumpVersionAfterRelease will bump script/briefing (:PerlExecFiles), but Git::Commit commits only allowed dirty files, so after the release script/briefing would stay at 0.006001 as an uncommitted change, one version behind in history. Options: commit_files_after_release = script/briefing in dist.ini, or a bundle change allowing ^script/.
+
+2026-11-20 06:11 Correction to the previous note: commit_files_after_release is NOT a fix. In @Git::VersionManager it feeds the 'release snapshot' commit (before Git::Tag), not the 'post-release commit' after BumpVersionAfterRelease. @Author::GETTY does not consume Config::Slicer, so dist.ini cannot add a slice like 'post-release commit.allow_dirty_match = ^script/' either. The fix belongs in the bundle (allow the ExecDir dir, or ^script/, next to ^bin/) or a manual commit of the script/briefing bump after release.
+
+2026-11-20 06:16 Done (uncommitted, Linux x86_64 only). Changed: our $VERSION 0.006000 in lib/App/Briefing.pm, CLI.pm, Filesystem.pm, Team.pm, script/briefing; .codex-plugin/plugin.json 0.6.0; dist.ini author torsten@raudssus.de plus the bin/ vs script/ comments (directive diff vs HEAD: author line only). Untouched: tests/ 0.001 fixtures (none reads the real $VERSION), briefing-bootstrap.c comments, bin/briefing-bootstrap.exe, Changes, TODO.md, .claude-plugin/plugin.json. Checks on the final tree: prove -lr t PASS (8 files, 361 tests); unittest reference 282 OK, 68 skipped (46 native Windows, 20 doctor --tsv without BRIEFING_TEST_CLI, 1 ziglang, 1 chain asset); Perl-CLI run 282 OK, 48 skipped (46 native, 1 ziglang, 1 chain asset); py_compile, sh -n, dash -n clean; doctor --harness both rc 0, briefing-doctor (installed cache 4253d8ea21f5) rc 0, 5 agents ok, no Codex agents. dzil build rc 0: EXE_FILES only script/briefing, no bin/ in MANIFEST, META.json/META.yml author and POD AUTHOR in all five files torsten@raudssus.de, POD VERSION 0.006000, binary smoke 'briefing 0.006000'. A V=0.006999 DZIL_BINARY_SKIP=1 probe build put 0.006999 into script/briefing as well, so the rewrite reaches it. Then dzil clean. Path budget at len(V)=8: config dir <= 88 (was 91), user name <= 71 under C:\Users, example PAR dir 80/binary 89 (was 77/86), warm-up interpreter reserve <= 96 (< 128), CLAUDE_CONFIG_DIR plain-chain max 225. No stated limit is wrong: the bootstrap.c example says 0.001 and its formula still holds, and briefing-bootstrap/README's 'about 90' is now exactly 88. Open: the post-release commit does not cover the script/briefing bump (see the earlier notes).
+
+Committed as 952041a (remove TODO.md) and ab7eac1 (version 0.006000 and metadata)
