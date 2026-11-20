@@ -1,0 +1,20 @@
+---
+class: standard
+created: 2026-11-20T16:58:25Z
+id: 42
+priority: medium
+status: backlog
+tags:
+- binary
+- release
+- provenance
+title: Adopt the bundle's provenance.json and drop the explicit bundle_ref
+updated: 2026-11-20T16:58:25Z
+---
+
+Bundle card p5-dist-zilla-pluginbundle-author-getty k33 is committed there as 0cc7935 (local, not pushed yet: pushing the bundle is the maintainer's call). What it changes for briefing once that commit is on the remote:
+- dzil-binary.yml's bundle_ref now defaults to '' = the workflow's own commit (job.workflow_sha), pinned once per run. A caller that pins uses: ...@<sha> gets the scripts from that same sha. When binaries.yml moves its uses: pin to a commit at or after 0cc7935, drop bundle_ref (or keep it equal to the uses: sha) - an explicit bundle_ref pointing at a commit before 0cc7935 fails, because facts.sh and provenance.pl are missing there.
+- Every run writes provenance.json (artifact <dist>-<version>.provenance; a release also gets it as release asset, not listed in SHA256SUMS, so the pin importer is unaffected): source commit (release: the commit the tag ends at), workflow and scripts commit, run id/attempt, tarball and binary sha256, per build leg runner/container/runner image/OS/arch/ABI/perl/PAR::Packer, per smoke cell runner image, docker image id and digests, host and target OS/arch/ABI and the sha256 of the smoked binary. A failed cross-check blocks the upload.
+- Update .claude/skills/briefing-core/references/binary-release.md section 3 to read provenance.json instead of scraping the run record; the smoke's release_evidence lines can stay as a second source or go.
+- No new permissions are needed in binaries.yml.
+Open until the first probe run: whether job.workflow_sha resolves (empty fails loudly), ImageOS/ImageVersion on macOS smoke runners.
