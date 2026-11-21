@@ -9,7 +9,7 @@ use if $^O eq 'MSWin32', 'Win32';
 use if $^O eq 'MSWin32', 'Win32::LongPath';
 use namespace::clean;
 
-our $VERSION = '0.006000';
+our $VERSION = '0.006001';
 
 sub is_windows { $^O eq 'MSWin32' }
 

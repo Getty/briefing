@@ -1,5 +1,7 @@
 Revision history for briefing
 
+{{$NEXT}}
+
 0.006000  2026-11-21 00:50:19Z
   - First CPAN release: the reusable `App::Briefing` Perl library and the
     `briefing` command (`script/briefing`) with the hook, doctor and
