@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-19T04:04:40Z
+id: 21
+priority: medium
+status: backlog
+tags:
+- hooks
+- binary
+- contract
+title: 'briefing hook: an uncaught die exits 2, which Claude Code treats as blocking'
+updated: 2026-11-21T06:52:45Z
+---
+
+Found by the k6 review (2026-11-19, Linux x86_64). Any uncaught die in `briefing hook ...` (Perl CLI and the packed binary alike) exits with whatever errno is left over, often 2 (for example a missing module: "Can't locate ..." after a failed require). Claude Code treats exit 2 as a blocking error: in PreToolUse it blocks the Agent call, while the hook contract says only a genuinely missing, explicitly declared skill may deny a spawn. The Python reference hook exits 1 on an uncaught exception. Not verified: how Codex treats exit 2. Decision for the maintainer: whether a crash in a hook should let the spawn through (non-blocking exit) or block it; then pin the exit code in the CLI hook path with a test. Not a k6 regression: on HEAD before k6 every command died at compile time when TOML::Tiny was missing, also with exit 2.
+
+2026-11-21, release test of 0.006000 on reuben (Linux x86_64, release binary briefing-0.006000-linux-x86_64): a concrete trigger that reaches it from a real-looking environment. With the process's working directory removed and PWD not in the environment, every hook dies in App::Briefing::Filesystem::join_path ('Path::Tiny paths require defined, positive-length parts at .../App/Briefing/Filesystem.pm line 101') and exits 2, also when the payload's cwd is valid. Measured for subagent-start, pre-tool-use and session-start; pre-tool-use exit 2 would block the Agent call. doctor dies the same way (line 110, exit 2), where skilletor 0.008000 prints 'the current directory no longer exists; pass --project-dir'. Cause: _build_cwd falls back to current_dir when PWD is unset, and path('.')->absolute has no directory to resolve. With PWD set (to the removed or to a valid directory) all three hooks answer normally, rc 0. Repro: mkdir d && cd d && rmdir ../d; printf '{"hook_event_name":"PreToolUse","cwd":"<valid project>","tool_name":"Agent","tool_input":{"subagent_type":"x"}}' | env -i HOME=... PATH=/usr/bin:/bin briefing hook pre-tool-use; echo $? -> 2. The Python hook the plugin runs today (no pin yet) is not affected: rc 0, only 'sh: 0: getcwd() failed' from the starter on stderr. Exposure: Linux/macOS sessions started without PWD (systemd, cron, env -i) whose directory is removed, e.g. a deleted worktree; on Windows a process's cwd cannot be removed. Becomes live for plugin users once binaries are pinned. Side note, Python hook: subagent-start with a non-string cwd (cwd: 42) prints a traceback and exits 1; the Perl side handles it.
