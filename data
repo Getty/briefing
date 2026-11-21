@@ -1,0 +1,25 @@
+---
+class: standard
+created: 2026-11-21T07:15:01Z
+id: 43
+priority: medium
+status: backlog
+tags:
+- binary
+- par
+- starter
+- bootstrap
+title: 'PAR 1.021 cache race: parallel cold starts load half-written modules, one
+  spawn unbriefed with exit 0'
+updated: 2026-11-21T07:15:01Z
+---
+
+Found in the 0.006000 release test (2026-11-21, reuben, release binary briefing-0.006000-linux-x86_64). N copies started at once on an empty PAR cache, the fan-out case briefing exists for: some die or print nothing.
+
+Measured, 8 parallel `hook subagent-start` per round (agent with briefing.skills, fresh TMPDIR each round): 9/96 starts broken, 5/12 rounds hit. Errors: "Method/Generate/Constructor.pm did not return a true value at <par>/inc/lib/Moo.pm line 205" (exit 255); "App/Briefing/Filesystem.pm did not return a true value" (exit 255); once "Unknown PerlIO layer \"encoding\" at <par>/inc/lib/Path/Tiny.pm line 1173" with exit 0 and empty stdout, a spawn that goes unbriefed with no hook error. Warm cache: 0/80. 8 parallel `--version` (the warm-up) on a fresh shared PAR_GLOBAL_TEMP: 5/48 failed; inc/ complete afterwards in 6/6 rounds (sha256 equal to a sequential extraction).
+
+Cause, read in the packed PAR.pm 1.021 (_extract_inc): `unless (-d $inc && -e $canary)` is tested before the flock and not again after it. A and B both see no canary; A extracts and writes the canary; B then takes the lock and extracts every member again, in place (Archive::Zip extractMember truncates and rewrites); C, arriving after the canary, skips the lock and loads inc/lib/*.pm while B rewrites them.
+
+Exposure today: the plugin at f7968f1 has no pin file, so hooks run Python; not affected. Affected: the standalone binary (default PAR dir under the temp directory), and the plugin and bootstrap once a release pins binaries. There the design mitigates it (versioned PAR_GLOBAL_TEMP beside the binary, warm-up inside SessionStart; --version extracts all of inc/, 759 files, canary set). Residual: (1) concurrent cold provisioning, several sessions starting together after an update: a warm-up that loses the race makes the starter drop a good download with "the downloaded <asset> does not run safely here" and fall back to Python, a wrong verdict; (2) a session whose warm-up finished may run its hook while a losing warm-up still rewrites inc/ (inferred from the code, not measured).
+
+Fix options, not decided: (a) warm up into a private directory (<par>.tmp.<pid>) and rename it into place, dropping it when the versioned one exists, the starter's own temp+rename for the binary. Measured viable: a cache extracted under a temporary PAR_GLOBAL_TEMP and renamed runs warm, with no re-extraction (863 files before and after), the canary untouched, no temporary path baked in, same timing as a normal warm cache. (b) Upstream: re-check the canary after the flock in PAR::_extract_inc (public tracker, the maintainer's call). (c) A lock around the warm-up. Related: k16 (warm-up under the temporary name; a different double extraction), k17. The same race on skilletor: skilletor board k272.
