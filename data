@@ -1,0 +1,21 @@
+{"action":"move","agent":"briefing","detail":"done","task_id":20,"ts":"2026-11-19T11:14:47Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":14,"ts":"2026-11-19T11:15:12Z"}
+{"action":"edit","agent":"briefing","detail":"in-progress","task_id":7,"ts":"2026-11-19T11:29:52Z"}
+{"action":"edit","agent":"briefing","detail":"review","task_id":5,"ts":"2026-11-20T04:46:41Z"}
+{"action":"move","agent":"briefing","detail":"done","task_id":5,"ts":"2026-11-20T04:46:45Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"done","task_id":5,"ts":"2026-11-20T04:46:49Z"}
+{"action":"edit","agent":"briefing","detail":"review","task_id":18,"ts":"2026-11-20T04:46:54Z"}
+{"action":"move","agent":"briefing","detail":"done","task_id":18,"ts":"2026-11-20T04:46:58Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"done","task_id":18,"ts":"2026-11-20T04:47:02Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":41,"ts":"2026-11-20T06:03:04Z"}
+{"action":"move","agent":"briefing-worker","detail":"in-progress","task_id":41,"ts":"2026-11-20T06:03:43Z"}
+{"action":"edit","agent":"briefing-worker","detail":"in-progress","task_id":41,"ts":"2026-11-20T06:06:31Z"}
+{"action":"edit","agent":"briefing-worker","detail":"in-progress","task_id":41,"ts":"2026-11-20T06:11:15Z"}
+{"action":"edit","agent":"briefing-worker","detail":"in-progress","task_id":41,"ts":"2026-11-20T06:11:57Z"}
+{"action":"handoff","agent":"briefing-worker","detail":"review","task_id":41,"ts":"2026-11-20T06:16:08Z"}
+{"action":"edit","agent":"briefing-worker","detail":"review","task_id":41,"ts":"2026-11-20T06:29:53Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"review","task_id":41,"ts":"2026-11-20T06:29:57Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":41,"ts":"2026-11-20T06:30:01Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":42,"ts":"2026-11-20T16:58:25Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":21,"ts":"2026-11-21T06:52:45Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":43,"ts":"2026-11-21T07:15:01Z"}
