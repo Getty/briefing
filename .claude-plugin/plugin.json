@@ -1,6 +1,6 @@
 {
   "name": "briefing",
-  "description": "Programmatic briefing beats prompt stuffing. Pre-loads declared skills into a subagent's context at spawn time, via a SubagentStart hook.",
+  "description": "Obsolete: Claude Code now preloads agent skills natively through a top-level `skills:` list in an agent's frontmatter. This last version only says so at session start; uninstall it.",
   "author": {
     "name": "Torsten Raudssus",
     "email": "getty@conflict.industries"

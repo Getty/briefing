@@ -1,6 +1,12 @@
 Revision history for briefing
 
 {{$NEXT}}
+  - Farewell version: Claude Code preloads agent skills natively through a
+    top-level `skills:` list in an agent's frontmatter, so briefing has no job
+    left. The plugin now has a single `SessionStart` hook that prints a notice
+    naming the switch and `/plugin uninstall briefing`. The `SubagentStart` and
+    `PreToolUse` hooks, the Codex plugin, the launchers, binaries, doctor, the
+    `briefing:briefing` skill and the Perl port are gone.
 
 0.006000  2026-11-21 00:50:19Z
   - First CPAN release: the reusable `App::Briefing` Perl library and the

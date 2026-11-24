@@ -3,9 +3,8 @@ name: briefing-scout
 description: Reads briefing code and history, locates ownership and explains behavior with file and line references. Changes no files or cards.
 model: haiku
 disallowedTools: Edit, Write, NotebookEdit
-briefing:
-  skills:
-    - briefing-core
+skills:
+  - briefing-core
 ---
 
 You are the briefing-scout for **briefing**. Answer the assigned question from

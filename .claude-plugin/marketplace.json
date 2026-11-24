@@ -8,8 +8,8 @@
     {
       "name": "briefing",
       "source": "./",
-      "description": "Pre-loads declared skills into a subagent's context at spawn time, via a SubagentStart hook. Programmatic briefing beats prompt stuffing."
+      "description": "Obsolete: Claude Code now preloads agent skills natively through a top-level `skills:` list in an agent's frontmatter. This last version only says so at session start."
     }
   ],
-  "description": "briefing's own one-plugin marketplace. Still maintained. Getty/marketplace carries this plugin alongside the others."
+  "description": "briefing's own one-plugin marketplace. The plugin is superseded by native skill preloading in Claude Code."
 }
