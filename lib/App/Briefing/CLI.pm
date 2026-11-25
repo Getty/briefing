@@ -4,7 +4,7 @@ package App::Briefing::CLI;
 use strict;
 use warnings;
 
-our $VERSION = '0.007000';
+our $VERSION = '0.007001';
 
 our $NOTICE = q{briefing is retired: Claude Code now preloads agent skills natively. Replace the `briefing:` block in an agent's frontmatter by a top-level `skills:` list, then run `/plugin uninstall briefing`. How: https://code.claude.com/docs/en/sub-agents#preload-skills-into-subagents};
 

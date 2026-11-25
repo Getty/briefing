@@ -1,5 +1,7 @@
 Revision history for briefing
 
+{{$NEXT}}
+
 0.007000  2026-11-25 03:18:41Z
   - Farewell version: Claude Code preloads agent skills natively through a
     top-level `skills:` list in an agent's frontmatter, so briefing has no job
