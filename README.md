@@ -41,6 +41,11 @@ Then remove the plugin:
 
 Documentation: https://code.claude.com/docs/en/sub-agents#preload-skills-into-subagents
 
+## CPAN
+
+The Perl distribution App-Briefing ends the same way: its last release ships the modules
+as stubs whose documentation names the replacement.
+
 ## License
 
 Artistic License 2.0, see [LICENSE](LICENSE).
