@@ -28,7 +28,7 @@ may require a fresh Claude Code session.
 
 ## Shared rules and skills
 
-`.claude/skilletor.json` declares sources and the `getty-cpan-dist` bundle.
+`.claude/skilletor.json` declares sources and the `getty-house` bundle.
 `skilletor sync --scope project` installs shared files; edit managed copies at their
 source. Project agents, `briefing-core`, settings and skilletor configuration are
 tracked; installed rules/skills, the lock and local settings are not.

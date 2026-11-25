@@ -4,7 +4,6 @@ description: Writes the hook test under t/. Delivers meaningful regression tests
 model: sonnet
 skills:
   - briefing-core
-  - getty-perl-core
   - superpowers:test-driven-development
   - kanban-issues-karr-ticket
 ---

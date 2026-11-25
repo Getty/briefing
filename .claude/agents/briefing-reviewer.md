@@ -5,7 +5,6 @@ model: opus
 disallowedTools: Edit, Write, NotebookEdit
 skills:
   - briefing-core
-  - getty-perl-core
   - superpowers:verification-before-completion
   - kanban-issues-karr-ticket
 ---

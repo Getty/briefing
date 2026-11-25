@@ -1,23 +1,6 @@
 *.swp
 *~
 .DS_Store
-__pycache__/
-*.pyc
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Project-local Perl dependencies and distribution builds
-/.build-deps/
-/.build/
-/.ci-dist/
-/.ci-install/
-/App-Briefing-*/
-/App-Briefing-*.tar.gz
-/blib/
-/pm_to_blib
-/.prove
-/cover_db/
 
 # Materialized karr view, not the tracked refs/karr/*
 /tasks/

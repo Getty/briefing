@@ -12,16 +12,13 @@
   },
   "install": {
     "bundles": [
-      "getty-cpan-dist@getty"
+      "getty-house@getty"
     ],
     "skills": [
       "getty-git-commit-style@getty",
       "getty-git-usage@getty",
       "kanban-issues-karr-ticket@karr",
-      "kanban-issues-karr-coordination@karr",
-      "getty-perl-core@getty",
-      "getty-perl-moo@getty",
-      "perl-release-dist-ini@getty"
+      "kanban-issues-karr-coordination@karr"
     ]
   }
 }

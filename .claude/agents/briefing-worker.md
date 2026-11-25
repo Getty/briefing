@@ -4,7 +4,6 @@ description: Maintains the briefing farewell plugin: the SessionStart hook, plug
 model: inherit
 skills:
   - briefing-core
-  - getty-perl-core
   - superpowers:test-driven-development
   - superpowers:systematic-debugging
   - superpowers:verification-before-completion
